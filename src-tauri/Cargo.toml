@@ -1,0 +1,51 @@
+[package]
+name = "nexus-v2-copilot"
+version = "0.1.0"
+description = "Nexus V2 — MEXC trading co-pilot (decision support, manual execution)"
+authors = ["Roberto <betokuffel@gmail.com>"]
+edition = "2021"
+
+[lib]
+name = "nexus_v2_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri core
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# WebSocket client (Binance stream)
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+futures-util = "0.3"
+url = "2"
+
+# HTTP client (Hyperliquid REST API)
+reqwest = { version = "0.12", features = ["json", "native-tls"] }
+
+# SQLite database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Crypto (for Hyperliquid signing)
+ethers-core = "2"
+ethers-signers = "2"
+hex = "0.4"
+
+# Time utilities
+chrono = { version = "0.4", features = ["serde"] }
+
+# Platform directories
+dirs-next = "2"
