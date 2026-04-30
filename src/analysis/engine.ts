@@ -111,9 +111,11 @@ export class MasterAnalysisEngine {
             if (volScore > 70) executionThreshold = 0.75; // Pre-news / High noise filter
             if (regime === 'range') executionThreshold = 0.55; // Earlier entry in accumulation
 
+            // Co-pilot: when threshold reached, EMIT setup (no execution).
+            // Frontend SetupCard renders it; user decides whether to trade on MEXC.
             if (probability >= executionThreshold && direction.bias !== 'neutral' && !this.isProcessing) {
-                console.log(`🚀 [EXECUTION] Threshold reached (${(probability*100).toFixed(0)}% >= ${(executionThreshold*100).toFixed(0)}%)`);
-                await this._executeTrade(direction.bias, probability, currentPrice);
+                console.log(`📡 [SETUP] Threshold reached (${(probability*100).toFixed(0)}% >= ${(executionThreshold*100).toFixed(0)}%) — emitting recommendation`);
+                this._emitSetup(direction.bias, probability, currentPrice);
             }
 
             return finalSignal;
@@ -147,32 +149,46 @@ export class MasterAnalysisEngine {
         return { bias: 'neutral', source: 'Neutral' };
     }
 
-    async _executeTrade(direction, score, price) {
+    /**
+     * Emit a structured setup recommendation to the frontend.
+     *
+     * Co-pilot mode: NEVER calls invoke('execute_auto_order'). The system only
+     * surfaces high-confluence setups to Roberto, who decides and executes
+     * manually on MEXC. The setup payload is consumed by <SetupCard /> and
+     * (later) the LeverageAdjustedRiskEngine which recomputes SL/TP per leverage.
+     */
+    _emitSetup(direction, score, price) {
         this.isProcessing = true;
         try {
             const setup = ScalpEngine.calculateSetup(direction);
-            
-            const signal = {
-                id: `sig_${Date.now()}`,
-                symbol: 'BTCUSDT',
+
+            const naturalSetup = {
+                id: `setup_${Date.now()}`,
+                symbol: 'BTC_USDT',     // MEXC contract format
                 direction: direction,
-                entry_price: price,
-                quantity: 0.01, // Placeholder, should be calculated from balance
-                stop_loss: setup.stopLoss,
-                take_profit: setup.takeProfit,
+                entryPrice: price,
+                naturalStopLoss: setup.stopLoss,
+                naturalTakeProfit: setup.takeProfit,
+                confidence: score,
                 reason: 'Institutional Confluence',
-                score: score,
-                is_bracket: true
+                timestamp: Date.now(),
             };
 
-            console.log('[MAESTRO] Triggering Trade:', signal);
-            await invoke('execute_auto_order', { signal });
-            
+            console.log('[MAESTRO] 📡 Setup detected:', naturalSetup);
+            // Co-pilot: emit to frontend so SetupCard renders + LeverageAdjustedRiskEngine
+            // can recompute SL/TP based on user-selected leverage.
+            EventBus.emit('SETUP_DETECTED', naturalSetup);
         } catch (error) {
-            console.error('[MAESTRO] Execution error:', error);
+            console.error('[MAESTRO] Setup emit error:', error);
         } finally {
             this.isProcessing = false;
         }
+    }
+
+    /** @deprecated Co-pilot does not auto-execute. Kept as no-op for any stale callers. */
+    async _executeTrade(direction, score, price) {
+        console.warn('[MAESTRO] _executeTrade is deprecated in co-pilot mode. Routing to _emitSetup.');
+        this._emitSetup(direction, score, price);
     }
 }
 

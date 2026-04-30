@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { EventBus } from './event-bus';
 import { candleManager } from './candle-manager';
 import { maestro } from './engine';
@@ -8,10 +9,10 @@ import { maestro } from './engine';
  * ═══════════════════════════════════════════════════════════════════════════════
  * ANALYSIS PIPELINE — ENTRY POINT
  * ═══════════════════════════════════════════════════════════════════════════════
- * 
- * This module connects the Tauri Rust backend events to the TypeScript analysis
- * engines. It handles the real-time data flow from the Binance WebSocket 
- * through the institutional intelligence pipeline.
+ *
+ * Connects the Tauri Rust backend events to the TypeScript analysis engines.
+ * Real-time data flow from MEXC futures WebSocket → ConfluenceEngine 2.0
+ * (8-dimension institutional pipeline) → frontend signals.
  */
 
 export async function initAnalysisPipeline() {
@@ -22,11 +23,11 @@ export async function initAnalysisPipeline() {
 
     // 1.5 Fetch History to Bootstrap Indicators/Engines
     try {
-        console.log('⏳ [Analysis] Fetching historical data (200m)...');
-        const history = await invoke('fetch_historical_candles', { 
-            symbol: 'BTCUSDT', 
-            interval: '1m', 
-            limit: 200 
+        console.log('⏳ [Analysis] Fetching historical data (200m from MEXC)...');
+        const history = await invoke('fetch_historical_candles', {
+            symbol: 'BTC_USDT',   // MEXC contract format (underscore)
+            interval: 'Min1',     // MEXC interval label
+            limit: 200
         });
         
         if (history && history.length > 0) {

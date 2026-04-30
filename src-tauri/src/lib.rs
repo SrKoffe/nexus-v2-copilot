@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// ANTIGRAVITY V2 — HFT Trading Terminal
+// NEXUS V2 — MEXC Trading Co-Pilot
 // Core Library — Tauri Entry Point
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -17,7 +17,7 @@ use core::database::Database;
 use core::event_bus::EventBus;
 use execution::engine::ExecutionEngine;
 use engine::state_manager::{StateManager, SystemState};
-use market_data::websocket::BinanceStream;
+use market_data::websocket::MexcStream;
 use risk::manager::RiskManager;
 
 // ─── TAURI STATE ────────────────────────────────────────────────────────────
@@ -135,7 +135,7 @@ async fn fetch_historical_candles(
     interval: String,
     limit: u32,
 ) -> Result<Vec<market_data::types::Kline>, String> {
-    market_data::history::fetch_binance_klines(&symbol, &interval, limit).await
+    market_data::history::fetch_mexc_klines(&symbol, &interval, limit).await
 }
 
 #[tauri::command]
@@ -199,10 +199,11 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle().clone();
 
-            // Start Binance WebSocket stream
-            let binance = BinanceStream::new("btcusdt");
+            // Start MEXC futures WebSocket stream
+            // Symbol uses MEXC contract format with underscore: BTC_USDT, ETH_USDT, etc.
+            let mexc = MexcStream::new("BTC_USDT");
             let sender = event_bus.sender();
-            binance.start(sender, handle.clone());
+            mexc.start(sender, handle.clone());
 
             // Start state price updater and Position Tracker — listens to ticks and updates StateManager
             let sm = state_manager.clone();
@@ -246,7 +247,7 @@ pub fn run() {
                 }
             });
 
-            log::info!("🛸 ANTIGRAVITY V2 — All systems online");
+            log::info!("🛸 NEXUS V2 CO-PILOT — All systems online (MEXC futures)");
             Ok(())
         })
         .run(tauri::generate_context!())
