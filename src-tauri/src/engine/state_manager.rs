@@ -6,7 +6,7 @@ use tauri::Emitter;
 
 use crate::core::event_bus::{SystemEvent, TradeSignal};
 use crate::engine::intent_engine::{IntentEngine, IntentResult};
-use crate::strategy::probability::{ProbabilityEngine, ProbabilityResult};
+use crate::strategy::probability::ProbabilityEngine;
 
 /// Core state for the trading bot
 pub struct StateManager {

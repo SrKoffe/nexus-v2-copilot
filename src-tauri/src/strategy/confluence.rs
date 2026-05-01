@@ -98,7 +98,7 @@ impl ConfluenceEngine {
         // 4. Signal determination
         let mut signal = "hold".to_string();
         let final_score = boosted_score;
-        let mut confidence = final_score.abs() as i64;
+        let confidence = final_score.abs() as i64;
         
         if final_score > 15.0 && confidence >= 25 {
             signal = "buy".to_string();
