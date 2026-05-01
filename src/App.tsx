@@ -6,6 +6,7 @@ import { LiveFeed } from './components/LiveFeed';
 import { PositionTracker } from './components/PositionTracker';
 import { LeverageSelector } from './components/LeverageSelector';
 import { DevTools } from './components/DevTools';
+import { useMexcAccount } from './hooks/useMexcAccount';
 import './App.css';
 import { initAnalysisPipeline } from './analysis';
 import { EventBus } from './analysis/event-bus';
@@ -27,6 +28,10 @@ function App() {
     const addToHistory = useNexusStore(s => s.addToHistory);
     const leverage = useNexusStore(s => s.leverage);
     const balance = useNexusStore(s => s.balanceUsd);
+    const mexcConfigured = useNexusStore(s => s.mexcConfigured);
+
+    // Poll MEXC private API for real-time balance (no-op if keys not configured)
+    useMexcAccount();
 
     useEffect(() => {
         let cleanup: (() => void) | undefined;
@@ -95,7 +100,29 @@ function App() {
                 <div className="status-indicators">
                     <span className="status-pill text-green">● MEXC</span>
                     <span className="status-pill text-blue">🛡️ ORACLE</span>
-                    <span className="mono text-xs text-secondary">${balance.toFixed(0)}</span>
+                    {mexcConfigured === false && (
+                        <span
+                            className="status-pill"
+                            style={{ color: '#ffaa00', borderColor: '#ffaa00' }}
+                            title="MEXC API keys not in .env — using default $1000 balance"
+                        >
+                            ⚠ NO API
+                        </span>
+                    )}
+                    {mexcConfigured === true && (
+                        <span
+                            className="status-pill text-green"
+                            title="MEXC private API connected (read-only)"
+                        >
+                            ✓ API
+                        </span>
+                    )}
+                    <span
+                        className="mono text-xs text-secondary"
+                        title={mexcConfigured === true ? 'Live MEXC equity' : 'Default fallback'}
+                    >
+                        ${balance.toFixed(2)}
+                    </span>
                 </div>
             </header>
 

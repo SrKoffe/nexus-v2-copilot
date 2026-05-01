@@ -48,6 +48,19 @@ interface NexusState {
     // ─── Account ───
     balanceUsd: number;
     setBalance: (b: number) => void;
+
+    /**
+     * MEXC API key status:
+     *  - null  = unknown (still checking)
+     *  - true  = keys present in .env, polling balance/positions
+     *  - false = keys missing, balance falls back to default
+     */
+    mexcConfigured: boolean | null;
+    setMexcConfigured: (v: boolean | null) => void;
+
+    /** Last successful balance fetch timestamp (ms). 0 if never. */
+    lastBalanceFetchAt: number;
+    setLastBalanceFetchAt: (ts: number) => void;
 }
 
 // ─── Pure helper, NOT a store method (avoids re-render loops) ───────────────
@@ -98,6 +111,12 @@ export const useNexusStore = create<NexusState>((set, get) => ({
             };
         }),
 
-    balanceUsd: 1000, // TODO: pull from MEXC private API once auth is wired up
+    balanceUsd: 1000, // Default fallback. Replaced by real MEXC equity when API keys are configured.
     setBalance: (b) => set({ balanceUsd: b }),
+
+    mexcConfigured: null,
+    setMexcConfigured: (v) => set({ mexcConfigured: v }),
+
+    lastBalanceFetchAt: 0,
+    setLastBalanceFetchAt: (ts) => set({ lastBalanceFetchAt: ts }),
 }));

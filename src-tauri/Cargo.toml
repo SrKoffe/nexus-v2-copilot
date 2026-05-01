@@ -24,12 +24,12 @@ serde_json = "1"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# WebSocket client (Binance stream)
+# WebSocket client (MEXC futures stream)
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures-util = "0.3"
 url = "2"
 
-# HTTP client (Hyperliquid REST API)
+# HTTP client (MEXC futures REST API)
 reqwest = { version = "0.12", features = ["json", "native-tls"] }
 
 # SQLite database
@@ -39,10 +39,18 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 log = "0.4"
 env_logger = "0.11"
 
-# Crypto (for Hyperliquid signing)
+# Crypto — HMAC SHA256 for MEXC private API request signing
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+
+# .env loader for API keys (kept out of git)
+dotenvy = "0.15"
+
+# Legacy from antigravity-v2 (Hyperliquid signing). Unused now but kept until
+# the old Hyperliquid execution path is fully removed in a future cleanup.
 ethers-core = "2"
 ethers-signers = "2"
-hex = "0.4"
 
 # Time utilities
 chrono = { version = "0.4", features = ["serde"] }

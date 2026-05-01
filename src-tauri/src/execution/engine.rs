@@ -1,188 +1,103 @@
 use log::{info, warn};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 
 use crate::core::event_bus::{TradeSignal, OrderResult};
 use crate::core::database::Database;
-use super::types::{ExecutionConfig, Position, Direction, PositionStatus};
+use super::types::{Position, Direction, PositionStatus};
 
-/// Hyperliquid Execution Engine
-/// 
-/// Ports `executionEngine.ts` to Rust with:
-/// - Rate limiting (40 calls / 10s window)
-/// - Oracle mode (block all execution)
-/// - Live/Simulation toggle
-/// - Bracket order support (SL/TP)
+/// ExecutionEngine — CO-PILOT MODE (permanently disabled execution).
+///
+/// In Nexus V2, Roberto executes trades manually on MEXC. This module never
+/// places orders. It exists to:
+///   - Track the "logical active position" (what setup the user marked as
+///     taken) so PositionTracker can render it
+///   - Persist trade open/close events to SQLite
+///   - Provide a hard, immovable safety wall: even if a future bug somehow
+///     calls `execute_with_protection`, it returns blocked.
+///
+/// REMOVED in F5:
+///   - `is_live_trading` toggle
+///   - `oracle_mode` toggle (oracle is now permanent and unconditional)
+///   - All HTTP code that would have POSTed orders to an exchange
+///   - Rate limiter (no API calls to rate limit)
+///
+/// If at some point we want autonomous execution again, that should be a
+/// SEPARATE crate/module with explicit, audited setup — not a flag flip.
 pub struct ExecutionEngine {
-    config: ExecutionConfig,
-    is_live_trading: AtomicBool,
-    oracle_mode: AtomicBool,
     active_position: Mutex<Option<Position>>,
-    api_call_timestamps: Mutex<Vec<u64>>,
     db: Arc<Database>,
 }
 
 impl ExecutionEngine {
     pub fn new(db: Arc<Database>) -> Self {
+        info!("[ExecutionEngine] 🛡️ Co-pilot mode (execution permanently disabled)");
         ExecutionEngine {
-            config: ExecutionConfig::default(),
-            is_live_trading: AtomicBool::new(false),
-            oracle_mode: AtomicBool::new(true), // Start in oracle mode (safe)
             active_position: Mutex::new(None),
-            api_call_timestamps: Mutex::new(Vec::new()),
             db,
         }
     }
 
-    /// Set live trading mode
-    pub fn set_live_trading(&self, enabled: bool) {
-        self.is_live_trading.store(enabled, Ordering::SeqCst);
-        info!("[ExecutionEngine] Mode: {}", if enabled { "🔴 LIVE" } else { "🟢 SIMULATION" });
-    }
-
-    /// Set oracle mode (blocks all execution)
-    pub fn set_oracle_mode(&self, enabled: bool) {
-        self.oracle_mode.store(enabled, Ordering::SeqCst);
-        info!("[ExecutionEngine] Oracle Mode: {}", if enabled { "ON 🛡️" } else { "OFF ⚡" });
-    }
-
-    /// Execute a trade with protection checks
+    /// Always blocks. Kept as a Tauri-callable shim so existing wiring (and any
+    /// future caller that drifts back to this codepath) gets a clear, auditable
+    /// "blocked" response instead of silent fallthrough.
     pub async fn execute_with_protection(&self, signal: &TradeSignal) -> OrderResult {
-        // 🛡️ ORACLE MODE: Block all execution
-        if self.oracle_mode.load(Ordering::SeqCst) {
-            info!("🛡️ [Oracle Mode] Trade blocked: {} {} @ ${}", signal.direction, signal.symbol, signal.entry_price);
-            return OrderResult {
-                success: false,
-                symbol: signal.symbol.clone(),
-                price: signal.entry_price,
-                quantity: signal.quantity,
-                direction: signal.direction.clone(),
-                message: "Oracle Mode: Execution blocked".into(),
-            };
-        }
-
-        // Simulation mode
-        if !self.is_live_trading.load(Ordering::SeqCst) {
-            info!("[ExecutionEngine] 🟢 SIMULATION: {} {} @ ${}", signal.direction, signal.symbol, signal.entry_price);
-            return OrderResult {
-                success: true,
-                symbol: signal.symbol.clone(),
-                price: signal.entry_price,
-                quantity: signal.quantity,
-                direction: signal.direction.clone(),
-                message: "Simulation mode".into(),
-            };
-        }
-
-        // Rate limiting
-        if let Err(msg) = self.check_rate_limit().await {
-            return OrderResult {
-                success: false,
-                symbol: signal.symbol.clone(),
-                price: signal.entry_price,
-                quantity: signal.quantity,
-                direction: signal.direction.clone(),
-                message: msg,
-            };
-        }
-
-        // Format symbol for Hyperliquid (BTC → BTC-PERP)
-        let hl_symbol = Self::format_hl_symbol(&signal.symbol);
-        let is_buy = signal.direction == "long" || signal.direction == "buy";
-
-        // Calculate slippage-adjusted limit price
-        let slippage_mult = if is_buy { 1.0 + self.config.slippage_pct } else { 1.0 - self.config.slippage_pct };
-        let limit_price = (signal.entry_price * slippage_mult).round();
-
-        info!("[ExecutionEngine] 🚀 {} {} | Qty: {} | Price: ${} | Limit: ${}",
-              if is_buy { "BUY" } else { "SELL" }, hl_symbol, signal.quantity, signal.entry_price, limit_price);
-
-        // TODO: Actual Hyperliquid API call via reqwest
-        // For now, return a placeholder that will be replaced with real HTTP calls
-        let result = OrderResult {
-            success: true,
-            symbol: hl_symbol.clone(),
+        warn!(
+            "🛡️ [Co-Pilot] execute_with_protection called but execution is permanently OFF. \
+             Signal: {} {} @ ${}",
+            signal.direction, signal.symbol, signal.entry_price
+        );
+        OrderResult {
+            success: false,
+            symbol: signal.symbol.clone(),
             price: signal.entry_price,
             quantity: signal.quantity,
             direction: signal.direction.clone(),
-            message: format!("Order sent: {} {} @ ${}", if is_buy { "BUY" } else { "SELL" }, hl_symbol, limit_price),
-        };
-
-        // Record trade in database
-        if result.success {
-            let _ = self.db.record_trade_open(
-                &hl_symbol,
-                &signal.direction,
-                signal.entry_price,
-                signal.quantity,
-                &signal.reason,
-            );
-
-            // Update active position
-            let mut pos = self.active_position.lock().await;
-            *pos = Some(Position {
-                id: signal.id.clone(),
-                symbol: hl_symbol,
-                direction: if is_buy { Direction::Long } else { Direction::Short },
-                entry_price: signal.entry_price,
-                quantity: signal.quantity,
-                stop_loss: signal.stop_loss,
-                take_profit: signal.take_profit,
-                leverage: signal.leverage.unwrap_or(self.config.default_leverage),
-                pnl_pct: 0.0,
-                opened_at: chrono::Utc::now().timestamp_millis() as u64,
-                status: PositionStatus::Open,
-            });
-        }
-
-        result
-    }
-
-    /// Rate limiter — prevents Hyperliquid IP ban (1200 weight/min limit)
-    async fn check_rate_limit(&self) -> Result<(), String> {
-        let mut timestamps = self.api_call_timestamps.lock().await;
-        let now = chrono::Utc::now().timestamp_millis() as u64;
-
-        // Clean old timestamps outside window
-        timestamps.retain(|&t| now - t < self.config.window_ms);
-
-        if timestamps.len() as u32 >= self.config.max_calls_per_window {
-            let wait_ms = self.config.window_ms - (now - timestamps[0]);
-            warn!("[ExecutionEngine] ⏳ Rate limit throttle: {}ms", wait_ms);
-            return Err(format!("Rate limited, try again in {}ms", wait_ms));
-        }
-
-        timestamps.push(now);
-        Ok(())
-    }
-
-    /// Format symbol for Hyperliquid (BTCUSDT → BTC-PERP)
-    fn format_hl_symbol(symbol: &str) -> String {
-        let clean = symbol
-            .replace("USDT", "")
-            .replace("usdt", "")
-            .to_uppercase()
-            .trim()
-            .to_string();
-
-        if clean.contains("-PERP") {
-            clean
-        } else {
-            format!("{}-PERP", clean)
+            message: "Co-pilot mode: execution is permanently disabled. \
+                      User must place this trade manually on MEXC."
+                .into(),
         }
     }
 
-    /// Get the current active position
+    /// Get the current active position (the setup Roberto marked as taken).
     pub async fn get_active_position(&self) -> Option<Position> {
         self.active_position.lock().await.clone()
     }
 
-    /// Close the active position (used by tracker when SL/TP hit)
+    /// Set the active position. Called when Roberto marks a setup as "taken".
+    /// Future: also call this when MEXC private API confirms a real open position.
+    pub async fn set_active_position(&self, signal: &TradeSignal) {
+        let is_long = signal.direction == "long" || signal.direction == "buy";
+        let pos = Position {
+            id: signal.id.clone(),
+            symbol: signal.symbol.clone(),
+            direction: if is_long { Direction::Long } else { Direction::Short },
+            entry_price: signal.entry_price,
+            quantity: signal.quantity,
+            stop_loss: signal.stop_loss,
+            take_profit: signal.take_profit,
+            leverage: signal.leverage.unwrap_or(25),
+            pnl_pct: 0.0,
+            opened_at: chrono::Utc::now().timestamp_millis() as u64,
+            status: PositionStatus::Open,
+        };
+
+        let _ = self.db.record_trade_open(
+            &signal.symbol,
+            &signal.direction,
+            signal.entry_price,
+            signal.quantity,
+            &signal.reason,
+        );
+
+        *self.active_position.lock().await = Some(pos);
+    }
+
+    /// Clear the active position (when outcome is marked).
     pub async fn close_position(&self) {
         let mut pos = self.active_position.lock().await;
         if let Some(p) = pos.take() {
-            info!("[ExecutionEngine] 🚨 Closed Position: {:?} {}", p.direction, p.symbol);
+            info!("[ExecutionEngine] 📒 Cleared active position: {:?} {}", p.direction, p.symbol);
         }
     }
 }
@@ -190,12 +105,34 @@ impl ExecutionEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::event_bus::TradeSignal;
 
-    #[test]
-    fn test_format_hl_symbol() {
-        assert_eq!(ExecutionEngine::format_hl_symbol("BTCUSDT"), "BTC-PERP");
-        assert_eq!(ExecutionEngine::format_hl_symbol("btcusdt"), "BTC-PERP");
-        assert_eq!(ExecutionEngine::format_hl_symbol("BTC-PERP"), "BTC-PERP");
-        assert_eq!(ExecutionEngine::format_hl_symbol("ETH"), "ETH-PERP");
+    fn dummy_signal() -> TradeSignal {
+        TradeSignal {
+            id: "test_1".into(),
+            symbol: "BTC_USDT".into(),
+            direction: "long".into(),
+            entry_price: 65000.0,
+            quantity: 0.01,
+            stop_loss: Some(64000.0),
+            take_profit: Some(67000.0),
+            leverage: Some(25),
+            reason: "test".into(),
+            score: 0.75,
+            is_bracket: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_is_always_blocked() {
+        // Sanity: even with a perfectly formed signal, execute returns blocked.
+        // Uses an in-memory dummy DB; if Database::new fails on memory path,
+        // this test is skipped in CI but documents intent.
+        if let Ok(db) = Database::new(":memory:") {
+            let engine = ExecutionEngine::new(Arc::new(db));
+            let result = engine.execute_with_protection(&dummy_signal()).await;
+            assert!(!result.success, "Execution must always be blocked in co-pilot mode");
+            assert!(result.message.contains("permanently disabled"));
+        }
     }
 }
