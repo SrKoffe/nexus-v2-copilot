@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    antigravity_v2_lib::run()
+    nexus_v2_lib::run()
 }
