@@ -5,6 +5,7 @@ import { SetupCard } from './components/SetupCard';
 import { LiveFeed } from './components/LiveFeed';
 import { PositionTracker } from './components/PositionTracker';
 import { LeverageSelector } from './components/LeverageSelector';
+import { DevTools } from './components/DevTools';
 import './App.css';
 import { initAnalysisPipeline } from './analysis';
 import { EventBus } from './analysis/event-bus';
@@ -38,6 +39,8 @@ function App() {
             const unlistenTick = await listen<{ price: number; symbol: string }>('market-tick', (event) => {
                 if (event.payload.price) {
                     setLivePrice(event.payload.price);
+                    // Expose last price globally so DevTools can inject realistic setups
+                    (window as any).__lastLivePrice = event.payload.price;
                 }
             });
 
@@ -149,6 +152,9 @@ function App() {
                     </div>
                 </section>
             </main>
+
+            {/* Dev-only: inject synthetic setups for E2E testing */}
+            <DevTools />
         </div>
     );
 }
