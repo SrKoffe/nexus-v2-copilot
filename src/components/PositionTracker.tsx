@@ -1,22 +1,25 @@
 import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useNexusStore, type SetupHistoryEntry } from '../store';
+import { useNexusStore, type SetupHistoryEntry, type MexcPosition } from '../store';
 import type { AdjustedSetup } from '../analysis/leverage-risk';
 
 /**
  * PositionTracker — shows the active setup (the one Roberto marked as "I'm
  * taking this trade") and lets him mark the outcome when the trade completes.
  *
- * Co-pilot mode: we don't read positions from any exchange. We track the
- * setup as a logical "active operation". When Roberto closes manually on MEXC,
- * he comes back here and clicks the appropriate outcome button so the system
- * can learn over time.
+ * F6c: cross-checks against live MEXC positions to detect:
+ *   - Setup marked active but no MEXC position open (forgot to execute? or already closed?)
+ *   - MEXC position open with no setup marked (forgot to mark?)
+ *   - Symbol/side mismatch between marked setup and MEXC reality
  */
 export const PositionTracker: React.FC = () => {
     const active = useNexusStore(s => s.activeSetup);
     const markOutcome = useNexusStore(s => s.markOutcome);
     const clearActive = useNexusStore(s => s.clearActive);
+    const mexcPositions = useNexusStore(s => s.openMexcPositions);
+    const mexcConfigured = useNexusStore(s => s.mexcConfigured);
 
+    // ─── State 1: no active setup ───
     if (!active || !active.adjusted.accepted) {
         return (
             <div style={{
@@ -27,18 +30,39 @@ export const PositionTracker: React.FC = () => {
                 height: '100%',
                 color: '#555',
                 gap: '6px',
+                padding: '8px',
             }}>
-                <span className="text-sm">No active operation</span>
-                <span className="text-xs text-secondary" style={{ opacity: 0.5 }}>
-                    Mark a setup as "taken" from the Setup card
-                </span>
+                {mexcPositions.length === 0 ? (
+                    <>
+                        <span className="text-sm">No active operation</span>
+                        <span className="text-xs text-secondary" style={{ opacity: 0.5 }}>
+                            Mark a setup as "taken" from the Setup card
+                        </span>
+                    </>
+                ) : (
+                    <>
+                        <span style={{ color: '#ffaa00', fontSize: '13px', fontWeight: 'bold' }}>
+                            ⚠ {mexcPositions.length} open on MEXC, none marked here
+                        </span>
+                        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+                            {mexcPositions.map(p => <MexcPositionRow key={p.position_id} pos={p} />)}
+                        </div>
+                    </>
+                )}
             </div>
         );
     }
 
+    // ─── State 2: active setup ───
     const setup = active.adjusted as AdjustedSetup;
     const isLong = setup.direction === 'long';
     const accent = isLong ? '#00ff88' : '#ff4444';
+
+    // Match logic: same symbol + same side
+    const match = mexcPositions.find(p =>
+        p.symbol === setup.symbol && p.side === setup.direction
+    );
+    const otherMexcPositions = mexcPositions.filter(p => p !== match);
 
     const onMark = async (outcome: SetupHistoryEntry['outcome'], pnlPct: number) => {
         markOutcome(outcome, pnlPct);
@@ -46,24 +70,24 @@ export const PositionTracker: React.FC = () => {
             await invoke('record_trade_outcome', {
                 outcome: {
                     id: `setup_${active.detectedAt}`,
-                    pnl_pct: pnlPct / 100, // backend wants fraction, not percent
+                    pnl_pct: pnlPct / 100,
                     exit_price: 0,
                     timestamp: Date.now(),
                 },
             });
         } catch (e) {
-            console.warn('[PositionTracker] record_trade_outcome failed (UI-only fallback):', e);
+            console.warn('[PositionTracker] record_trade_outcome failed:', e);
         }
     };
 
-    // PnL percentage relative to margin (1R = stopLossPct × leverage of margin)
+    // PnL relative to margin: 1R = stopLossPct × leverage % gain on margin
     const r = setup.stopLossPct * setup.leverage;
-    const tp1Pnl = +(r * 1.0).toFixed(2);    // 1R = 100% of margin risk gain
-    const tp2Pnl = +(r * 2.0).toFixed(2);    // 2R
+    const tp1Pnl = +(r * 1.0).toFixed(2);
+    const tp2Pnl = +(r * 2.0).toFixed(2);
     const slPnl = -r;
 
     return (
-        <div style={{ padding: '4px', display: 'flex', flexDirection: 'column', gap: '14px', height: '100%' }}>
+        <div style={{ padding: '4px', display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span className="mono" style={{ color: accent, fontWeight: 'bold', fontSize: '14px' }}>
                     {setup.symbol} {isLong ? 'LONG' : 'SHORT'}
@@ -73,6 +97,11 @@ export const PositionTracker: React.FC = () => {
                     {timeAgo(active.detectedAt)}
                 </span>
             </div>
+
+            {/* Match indicator (if MEXC keys configured) */}
+            {mexcConfigured === true && (
+                <MatchBadge match={match} setup={setup} />
+            )}
 
             <div style={{
                 background: 'rgba(0,0,0,0.25)',
@@ -86,28 +115,26 @@ export const PositionTracker: React.FC = () => {
                 <Row label="SL"  value={`$${setup.stopLoss.toFixed(1)}`} color="#ff4444" />
                 <Row label="TP1" value={`$${setup.takeProfit1.toFixed(1)}`} color="#00ff88" />
                 <Row label="TP2" value={`$${setup.takeProfit2.toFixed(1)}`} color="#00ff88" />
+                {match && (
+                    <>
+                        <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)', margin: '6px 0' }} />
+                        <Row label="MEXC entry"  value={`$${match.entry_price.toFixed(1)}`} color="#88ccff" />
+                        <Row label="MEXC mark"   value={`$${match.mark_price.toFixed(1)}`} color="#88ccff" />
+                        <Row label="Live PnL"
+                             value={`$${match.unrealized_pnl.toFixed(2)}`}
+                             color={match.unrealized_pnl >= 0 ? '#00ff88' : '#ff4444'} />
+                    </>
+                )}
             </div>
 
-            <div className="text-xs text-secondary" style={{ marginTop: '4px' }}>
+            <div className="text-xs text-secondary" style={{ marginTop: '2px' }}>
                 Outcome (clica quando fechar na MEXC):
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                <OutcomeButton
-                    label={`✓ TP1  (+${tp1Pnl}%)`}
-                    color="#00ff88"
-                    onClick={() => onMark('tp1_hit', tp1Pnl)}
-                />
-                <OutcomeButton
-                    label={`✓✓ TP2  (+${tp2Pnl}%)`}
-                    color="#00ff88"
-                    onClick={() => onMark('tp2_hit', tp2Pnl)}
-                />
-                <OutcomeButton
-                    label={`✗ SL  (${slPnl.toFixed(2)}%)`}
-                    color="#ff4444"
-                    onClick={() => onMark('sl_hit', slPnl)}
-                />
+                <OutcomeButton label={`✓ TP1  (+${tp1Pnl}%)`} color="#00ff88" onClick={() => onMark('tp1_hit', tp1Pnl)} />
+                <OutcomeButton label={`✓✓ TP2  (+${tp2Pnl}%)`} color="#00ff88" onClick={() => onMark('tp2_hit', tp2Pnl)} />
+                <OutcomeButton label={`✗ SL  (${slPnl.toFixed(2)}%)`} color="#ff4444" onClick={() => onMark('sl_hit', slPnl)} />
                 <OutcomeButton
                     label="↩ Manual exit"
                     color="#aaa"
@@ -119,6 +146,18 @@ export const PositionTracker: React.FC = () => {
                     }}
                 />
             </div>
+
+            {/* Other MEXC positions (didn't match the active setup — could be unrelated trades) */}
+            {otherMexcPositions.length > 0 && (
+                <div style={{ marginTop: '4px' }}>
+                    <div className="text-xs text-secondary" style={{ marginBottom: '4px', color: '#aaa' }}>
+                        Other open MEXC:
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {otherMexcPositions.map(p => <MexcPositionRow key={p.position_id} pos={p} compact />)}
+                    </div>
+                </div>
+            )}
 
             <button
                 onClick={() => {
@@ -140,6 +179,70 @@ export const PositionTracker: React.FC = () => {
             >
                 discard (no log)
             </button>
+        </div>
+    );
+};
+
+// ─── Match badge ────────────────────────────────────────────────────────────
+
+const MatchBadge: React.FC<{ match: MexcPosition | undefined; setup: AdjustedSetup }> = ({ match, setup }) => {
+    if (match) {
+        const sameLev = match.leverage === setup.leverage;
+        return (
+            <div style={{
+                background: 'rgba(0, 255, 136, 0.08)',
+                border: '1px solid rgba(0, 255, 136, 0.3)',
+                color: '#00ff88',
+                padding: '6px 10px',
+                borderRadius: '4px',
+                fontSize: '11px',
+            }}>
+                ✓ MEXC position matched · {match.leverage}x{!sameLev && ` (you marked ${setup.leverage}x)`}
+            </div>
+        );
+    }
+    return (
+        <div style={{
+            background: 'rgba(255, 170, 0, 0.06)',
+            border: '1px solid rgba(255, 170, 0, 0.25)',
+            color: '#ffcc55',
+            padding: '6px 10px',
+            borderRadius: '4px',
+            fontSize: '11px',
+        }}>
+            ⚠ No matching {setup.direction.toUpperCase()} {setup.symbol} on MEXC. Did you execute?
+        </div>
+    );
+};
+
+// ─── MEXC position row (for "other" or no-active states) ───────────────────
+
+const MexcPositionRow: React.FC<{ pos: MexcPosition; compact?: boolean }> = ({ pos, compact }) => {
+    const isLong = pos.side === 'long';
+    const color = isLong ? '#00ff88' : '#ff4444';
+    return (
+        <div style={{
+            background: 'rgba(0,0,0,0.25)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            borderRadius: '4px',
+            padding: compact ? '4px 8px' : '6px 10px',
+            fontFamily: 'JetBrains Mono, monospace',
+            fontSize: '11px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '8px',
+        }}>
+            <span style={{ color, fontWeight: 'bold' }}>
+                {pos.symbol} {isLong ? '↑' : '↓'} {pos.leverage}x
+            </span>
+            <span style={{ color: '#aaa' }}>${pos.entry_price.toFixed(1)} → ${pos.mark_price.toFixed(1)}</span>
+            <span style={{
+                color: pos.unrealized_pnl >= 0 ? '#00ff88' : '#ff4444',
+                fontWeight: 'bold',
+            }}>
+                {pos.unrealized_pnl >= 0 ? '+' : ''}${pos.unrealized_pnl.toFixed(2)}
+            </span>
         </div>
     );
 };

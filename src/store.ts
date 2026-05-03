@@ -61,6 +61,27 @@ interface NexusState {
     /** Last successful balance fetch timestamp (ms). 0 if never. */
     lastBalanceFetchAt: number;
     setLastBalanceFetchAt: (ts: number) => void;
+
+    /** Live open positions from MEXC futures (read-only). [] if no positions or keys missing. */
+    openMexcPositions: MexcPosition[];
+    setOpenMexcPositions: (positions: MexcPosition[]) => void;
+}
+
+/**
+ * Mirror of Rust struct `OpenPosition` from src-tauri/src/market_data/mexc_private.rs.
+ * Field names use snake_case because Tauri serializes Rust → JSON without renaming.
+ */
+export interface MexcPosition {
+    symbol: string;
+    position_id: number;
+    side: 'long' | 'short';
+    leverage: number;
+    size: number;
+    entry_price: number;
+    mark_price: number;
+    liquidation_price: number;
+    unrealized_pnl: number;
+    margin: number;
 }
 
 // ─── Pure helper, NOT a store method (avoids re-render loops) ───────────────
@@ -119,4 +140,7 @@ export const useNexusStore = create<NexusState>((set, get) => ({
 
     lastBalanceFetchAt: 0,
     setLastBalanceFetchAt: (ts) => set({ lastBalanceFetchAt: ts }),
+
+    openMexcPositions: [],
+    setOpenMexcPositions: (positions) => set({ openMexcPositions: positions }),
 }));

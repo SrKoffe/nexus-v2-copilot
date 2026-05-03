@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useNexusStore } from '../store';
+import { useNexusStore, type MexcPosition } from '../store';
 
 /**
  * useMexcAccount — polls MEXC private API for balance updates.
@@ -20,23 +20,38 @@ export function useMexcAccount() {
     const setBalance = useNexusStore(s => s.setBalance);
     const setMexcConfigured = useNexusStore(s => s.setMexcConfigured);
     const setLastBalanceFetchAt = useNexusStore(s => s.setLastBalanceFetchAt);
+    const setOpenMexcPositions = useNexusStore(s => s.setOpenMexcPositions);
 
     useEffect(() => {
         let cancelled = false;
         let interval: ReturnType<typeof setInterval> | null = null;
 
         async function refresh() {
-            try {
-                const balance = await invoke<number>('get_mexc_balance');
-                if (cancelled) return;
-                if (typeof balance === 'number' && balance >= 0) {
-                    setBalance(balance);
+            // Balance + positions in parallel — single round-trip latency.
+            const [balanceRes, positionsRes] = await Promise.allSettled([
+                invoke<number>('get_mexc_balance'),
+                invoke<MexcPosition[]>('get_mexc_positions'),
+            ]);
+
+            if (cancelled) return;
+
+            if (balanceRes.status === 'fulfilled') {
+                const b = balanceRes.value;
+                if (typeof b === 'number' && b >= 0) {
+                    setBalance(b);
                     setLastBalanceFetchAt(Date.now());
                 }
-            } catch (e) {
-                // Common cases: network blip, MEXC rate limit, key permissions wrong.
-                // Don't spam the console — log once and let next poll retry.
-                console.warn('[useMexcAccount] balance fetch failed:', e);
+            } else {
+                console.warn('[useMexcAccount] balance fetch failed:', balanceRes.reason);
+            }
+
+            if (positionsRes.status === 'fulfilled') {
+                const p = positionsRes.value;
+                if (Array.isArray(p)) {
+                    setOpenMexcPositions(p);
+                }
+            } else {
+                console.warn('[useMexcAccount] positions fetch failed:', positionsRes.reason);
             }
         }
 
@@ -67,5 +82,5 @@ export function useMexcAccount() {
             cancelled = true;
             if (interval) clearInterval(interval);
         };
-    }, [setBalance, setMexcConfigured, setLastBalanceFetchAt]);
+    }, [setBalance, setMexcConfigured, setLastBalanceFetchAt, setOpenMexcPositions]);
 }
