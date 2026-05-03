@@ -65,6 +65,15 @@ interface NexusState {
     /** Live open positions from MEXC futures (read-only). [] if no positions or keys missing. */
     openMexcPositions: MexcPosition[];
     setOpenMexcPositions: (positions: MexcPosition[]) => void;
+
+    // ─── Risk config (F7 scalper model) ───
+    /** Target NET PnL margem pra TP1 (após fees). Default 3% */
+    tp1NetTarget: number;
+    /** Target NET PnL margem pra TP2 (após fees). Default 8% */
+    tp2NetTarget: number;
+    /** MEXC taker fee % (do nominal). Default 0.04 */
+    takerFeePct: number;
+    setRiskConfig: (cfg: { tp1NetTarget?: number; tp2NetTarget?: number; takerFeePct?: number }) => void;
 }
 
 /**
@@ -143,4 +152,15 @@ export const useNexusStore = create<NexusState>((set, get) => ({
 
     openMexcPositions: [],
     setOpenMexcPositions: (positions) => set({ openMexcPositions: positions }),
+
+    // ─── Risk config overrides (F7 scalper model) ───
+    tp1NetTarget: 3,        // % margin net target for TP1 (default; user can tweak in DevTools)
+    tp2NetTarget: 8,        // % margin net target for TP2
+    takerFeePct: 0.04,      // MEXC default; lower if VIP tier
+    setRiskConfig: (cfg: { tp1NetTarget?: number; tp2NetTarget?: number; takerFeePct?: number }) =>
+        set((s) => ({
+            tp1NetTarget: cfg.tp1NetTarget ?? s.tp1NetTarget,
+            tp2NetTarget: cfg.tp2NetTarget ?? s.tp2NetTarget,
+            takerFeePct: cfg.takerFeePct ?? s.takerFeePct,
+        })),
 }));

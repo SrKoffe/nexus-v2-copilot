@@ -80,11 +80,12 @@ export const PositionTracker: React.FC = () => {
         }
     };
 
-    // PnL relative to margin: 1R = stopLossPct × leverage % gain on margin
-    const r = setup.stopLossPct * setup.leverage;
-    const tp1Pnl = +(r * 1.0).toFixed(2);
-    const tp2Pnl = +(r * 2.0).toFixed(2);
-    const slPnl = -r;
+    // PnL margem (scalper model F7):
+    //   TP* já são "net" (após fees) configurados no engine → usa direto
+    //   SL = -(SL_margin% + fees) → perde stoploss e ainda paga fees na saída
+    const tp1Pnl = +setup.takeProfit1MarginNet.toFixed(2);
+    const tp2Pnl = +setup.takeProfit2MarginNet.toFixed(2);
+    const slPnl = -(setup.stopLossMarginPct + setup.feesMarginPct);
 
     return (
         <div style={{ padding: '4px', display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>

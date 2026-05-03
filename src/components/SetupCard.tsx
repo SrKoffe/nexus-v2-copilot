@@ -90,32 +90,37 @@ const AcceptedView: React.FC<{ setup: AdjustedSetup; onTake: () => void }> = ({ 
                 <span>{setup.leverage}x · conf {(setup.confidence * 100).toFixed(0)}%</span>
             </div>
 
-            {/* Entry / SL / TP */}
+            {/* Entry / SL / TP — scalper model: TP em margin-PnL net */}
             <div style={{
                 background: 'rgba(0,0,0,0.25)',
                 border: '1px solid rgba(255,255,255,0.06)',
                 borderRadius: '6px',
                 padding: '10px 12px',
                 fontFamily: 'JetBrains Mono, monospace',
-                fontSize: '13px',
+                fontSize: '12px',
             }}>
                 <Row label="Entry" value={`$${setup.entryPrice.toFixed(1)}`} color="#fff" />
                 <Row label="SL"
-                     value={`$${setup.stopLoss.toFixed(1)}  (-${setup.stopLossPct.toFixed(2)}%)`}
+                     value={`$${setup.stopLoss.toFixed(1)}  (-${setup.stopLossPct.toFixed(2)}% / −${setup.stopLossMarginPct.toFixed(0)}% margem)`}
                      color="#ff4444" />
-                <Row label="TP1 (1R, 50%)"
-                     value={`$${setup.takeProfit1.toFixed(1)}  (+${setup.takeProfit1Pct.toFixed(2)}%)`}
+                <Row label={`TP1 (50%, +${setup.takeProfit1MarginNet}% net)`}
+                     value={`$${setup.takeProfit1.toFixed(1)}  (+${setup.takeProfit1Pct.toFixed(3)}%)`}
                      color="#00ff88" />
-                <Row label="TP2 (2R, 50%)"
-                     value={`$${setup.takeProfit2.toFixed(1)}  (+${setup.takeProfit2Pct.toFixed(2)}%)`}
+                <Row label={`TP2 (50%, +${setup.takeProfit2MarginNet}% net)`}
+                     value={`$${setup.takeProfit2.toFixed(1)}  (+${setup.takeProfit2Pct.toFixed(3)}%)`}
                      color="#00ff88" />
                 <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)', margin: '8px 0' }} />
-                <Row label="RR" value={setup.rr.toFixed(2)} color="#fff" />
+                <Row label="Fees (round-trip)"
+                     value={`-${setup.feesMarginPct.toFixed(2)}% margem`}
+                     color="#ffaa00" />
+                <Row label="Break-even WR"
+                     value={`${(setup.breakEvenWinRate * 100).toFixed(0)}% (conf ${(setup.confidence * 100).toFixed(0)}%)`}
+                     color={setup.breakEvenWinRate <= setup.confidence ? '#00ff88' : '#ff4444'} />
                 <Row label="Survival"
                      value={`${(setup.survivalScore * 100).toFixed(0)}%`}
                      color={setup.survivalScore >= 0.85 ? '#00ff88' : '#ffaa00'} />
-                <Row label="Margin"
-                     value={`$${setup.positionSizeUsd.toFixed(2)} (notional $${setup.notionalUsd.toFixed(0)})`}
+                <Row label="Margin / Notional"
+                     value={`$${setup.positionSizeUsd.toFixed(2)} / $${setup.notionalUsd.toFixed(0)}`}
                      color="#aaa" />
             </div>
 
@@ -221,11 +226,22 @@ const Row: React.FC<{ label: string; value: string; color: string }> = ({ label,
     </div>
 );
 
+/**
+ * Classify quality based on:
+ *   - confidence (analytical edge)
+ *   - survivalScore (room until liquidation)
+ *   - confidence margin over break-even WR (statistical edge)
+ *
+ * In the scalper model, RR is replaced by `(confidence - breakEvenWR)` —
+ * how far above the break-even point the analysis predicts.
+ */
 function classify(setup: AdjustedSetup): string {
     const c = setup.confidence;
     const s = setup.survivalScore;
-    if (c >= 0.75 && s >= 0.85 && setup.rr >= 2) return 'A+';
-    if (c >= 0.65 && s >= 0.80) return 'A';
-    if (c >= 0.55 && s >= 0.70) return 'B';
+    const edge = c - setup.breakEvenWinRate;  // statistical edge
+
+    if (c >= 0.75 && s >= 0.85 && edge >= 0.15) return 'A+';
+    if (c >= 0.65 && s >= 0.80 && edge >= 0.05) return 'A';
+    if (c >= 0.55 && s >= 0.70 && edge >= 0.00) return 'B';
     return 'C';
 }

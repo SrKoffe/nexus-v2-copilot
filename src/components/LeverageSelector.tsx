@@ -26,6 +26,8 @@ export const LeverageSelector: React.FC = () => {
     };
 
     const slPct = LeverageAdjustedRiskEngine.targetSlPctForLeverage(leverage);
+    const takerFee = useNexusStore(s => s.takerFeePct);
+    const feesMargin = LeverageAdjustedRiskEngine.feesMarginPctFor(leverage, takerFee);
 
     // Color shifts as leverage grows — green/cyan/yellow/orange/red
     const accent =
@@ -98,8 +100,11 @@ export const LeverageSelector: React.FC = () => {
                 ))}
             </div>
 
-            <span className="mono text-xs text-secondary" title="Max SL% recommended for this leverage">
-                SL ≤ {slPct}%
+            <span
+                className="mono text-xs text-secondary"
+                title={`Max SL ${slPct}% price | Round-trip fees ${feesMargin.toFixed(1)}% margin`}
+            >
+                SL ≤ {slPct}% · fee {feesMargin.toFixed(1)}%
             </span>
         </div>
     );

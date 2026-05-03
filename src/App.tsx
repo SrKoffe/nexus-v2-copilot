@@ -10,7 +10,7 @@ import { useMexcAccount } from './hooks/useMexcAccount';
 import './App.css';
 import { initAnalysisPipeline } from './analysis';
 import { EventBus } from './analysis/event-bus';
-import { LeverageAdjustedRiskEngine, type NaturalSetup } from './analysis/leverage-risk';
+import { LeverageAdjustedRiskEngine, DEFAULT_CONFIG, type NaturalSetup } from './analysis/leverage-risk';
 import { useNexusStore } from './store';
 
 /**
@@ -56,8 +56,15 @@ function App() {
 
         // Subscribe to SETUP_DETECTED on internal EventBus (emitted by Maestro)
         const handleSetup = (natural: NaturalSetup) => {
-            const { leverage: lev, balanceUsd } = useNexusStore.getState();
-            const adjusted = LeverageAdjustedRiskEngine.adjust(natural, lev, balanceUsd);
+            const s = useNexusStore.getState();
+            // Build config: defaults + user overrides from store (F7 scalper config)
+            const config = {
+                ...DEFAULT_CONFIG,
+                tp1TargetNetMarginPct: s.tp1NetTarget,
+                tp2TargetNetMarginPct: s.tp2NetTarget,
+                takerFeePct: s.takerFeePct,
+            };
+            const adjusted = LeverageAdjustedRiskEngine.adjust(natural, s.leverage, s.balanceUsd, config);
 
             const entry = {
                 natural,

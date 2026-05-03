@@ -188,31 +188,90 @@ export const DevTools: React.FC = () => {
             </div>
 
             <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
                     <span style={{ color: '#888', fontSize: '10px' }}>Balance:</span>
                     <input
                         type="number"
                         value={balance}
                         onChange={(e) => setBalance(parseFloat(e.target.value) || 0)}
-                        style={{
-                            background: 'rgba(0,0,0,0.4)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            color: '#fff',
-                            padding: '3px 6px',
-                            borderRadius: '3px',
-                            fontFamily: 'inherit',
-                            fontSize: '11px',
-                            width: '80px',
-                        }}
+                        style={inputStyle}
                     />
                     <span style={{ color: '#888', fontSize: '10px' }}>USD</span>
                 </div>
+
+                <ScalpConfigPanel />
             </div>
 
             <div style={{ marginTop: '10px', color: '#555', fontSize: '9px', lineHeight: 1.4 }}>
                 Setups use last live price.<br />
-                Borderline tests show how leverage tightens SL.
+                TP/fee config aplicado em PRÓXIMOS setups injetados.
             </div>
         </div>
     );
+};
+
+// ─── Scalp config (F7) ─────────────────────────────────────────────────────
+
+const ScalpConfigPanel: React.FC = () => {
+    const tp1 = useNexusStore(s => s.tp1NetTarget);
+    const tp2 = useNexusStore(s => s.tp2NetTarget);
+    const fee = useNexusStore(s => s.takerFeePct);
+    const setRiskConfig = useNexusStore(s => s.setRiskConfig);
+
+    return (
+        <div style={{
+            marginTop: '8px',
+            paddingTop: '8px',
+            borderTop: '1px dashed rgba(255,255,255,0.06)',
+        }}>
+            <div style={{ color: '#ffaa00', fontSize: '9px', marginBottom: '6px', letterSpacing: '0.5px' }}>
+                SCALP TARGETS (% margin net)
+            </div>
+
+            <ConfigRow label="TP1 net" value={tp1} step={0.5} min={0.5} max={20}
+                onChange={(v) => setRiskConfig({ tp1NetTarget: v })} suffix="%" />
+            <ConfigRow label="TP2 net" value={tp2} step={0.5} min={0.5} max={50}
+                onChange={(v) => setRiskConfig({ tp2NetTarget: v })} suffix="%" />
+            <ConfigRow label="Taker fee" value={fee} step={0.005} min={0} max={0.2}
+                onChange={(v) => setRiskConfig({ takerFeePct: v })} suffix="%" />
+        </div>
+    );
+};
+
+const ConfigRow: React.FC<{
+    label: string;
+    value: number;
+    step: number;
+    min: number;
+    max: number;
+    suffix: string;
+    onChange: (v: number) => void;
+}> = ({ label, value, step, min, max, suffix, onChange }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+        <span style={{ color: '#888', fontSize: '10px', width: '70px' }}>{label}:</span>
+        <input
+            type="number"
+            value={value}
+            step={step}
+            min={min}
+            max={max}
+            onChange={(e) => {
+                const n = parseFloat(e.target.value);
+                if (isFinite(n)) onChange(n);
+            }}
+            style={{ ...inputStyle, width: '60px' }}
+        />
+        <span style={{ color: '#888', fontSize: '10px' }}>{suffix}</span>
+    </div>
+);
+
+const inputStyle: React.CSSProperties = {
+    background: 'rgba(0,0,0,0.4)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    color: '#fff',
+    padding: '3px 6px',
+    borderRadius: '3px',
+    fontFamily: 'inherit',
+    fontSize: '11px',
+    width: '80px',
 };
