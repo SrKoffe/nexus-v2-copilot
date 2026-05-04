@@ -66,19 +66,44 @@ export const PositionTracker: React.FC = () => {
 
     const onMark = async (outcome: SetupHistoryEntry['outcome'], pnlPct: number) => {
         markOutcome(outcome, pnlPct);
+        if (!outcome) return;
+
+        // F8: persist with full metadata for the weekly report
         try {
-            await invoke('record_trade_outcome', {
+            await invoke('record_setup_outcome', {
                 outcome: {
-                    id: `setup_${active.detectedAt}`,
-                    pnl_pct: pnlPct / 100,
-                    exit_price: 0,
-                    timestamp: Date.now(),
+                    id: 0,                          // auto-incremented in SQLite
+                    setup_id: `setup_${active.detectedAt}`,
+                    symbol: setup.symbol,
+                    direction: setup.direction,
+                    leverage: setup.leverage,
+                    confidence: setup.confidence,
+                    classification: classifyForRecord(setup),
+                    entry_price: setup.entryPrice,
+                    stop_loss: setup.stopLoss,
+                    take_profit_1: setup.takeProfit1,
+                    take_profit_2: setup.takeProfit2,
+                    outcome_label: outcome,
+                    pnl_pct: pnlPct,                // %  margin (not fraction)
+                    detected_at_ms: active.detectedAt,
+                    closed_at_ms: Date.now(),
                 },
             });
         } catch (e) {
-            console.warn('[PositionTracker] record_trade_outcome failed:', e);
+            console.warn('[PositionTracker] record_setup_outcome failed:', e);
         }
     };
+
+    /** Same logic as SetupCard's classify — duplicated locally to avoid coupling. */
+    function classifyForRecord(s: AdjustedSetup): string {
+        const c = s.confidence;
+        const sv = s.survivalScore;
+        const edge = c - s.breakEvenWinRate;
+        if (c >= 0.75 && sv >= 0.85 && edge >= 0.15) return 'A+';
+        if (c >= 0.65 && sv >= 0.80 && edge >= 0.05) return 'A';
+        if (c >= 0.55 && sv >= 0.70 && edge >= 0.00) return 'B';
+        return 'C';
+    }
 
     // PnL margem (scalper model F7):
     //   TP* já são "net" (após fees) configurados no engine → usa direto

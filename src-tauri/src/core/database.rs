@@ -30,7 +30,25 @@ impl Database {
                 opened_at TEXT NOT NULL,
                 closed_at TEXT,
                 status TEXT DEFAULT 'open'
-            );"
+            );
+            CREATE TABLE IF NOT EXISTS setup_outcomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                setup_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                leverage INTEGER NOT NULL,
+                confidence REAL NOT NULL,
+                classification TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                stop_loss REAL NOT NULL,
+                take_profit_1 REAL NOT NULL,
+                take_profit_2 REAL NOT NULL,
+                outcome_label TEXT NOT NULL,
+                pnl_pct REAL NOT NULL,
+                detected_at_ms INTEGER NOT NULL,
+                closed_at_ms INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_setup_outcomes_closed ON setup_outcomes(closed_at_ms);"
         )?;
 
         Ok(Database {
@@ -149,6 +167,82 @@ pub struct TradeRecord {
     pub opened_at: String,
     pub closed_at: Option<String>,
     pub status: String,
+}
+
+/// Setup outcome record (F8): full metadata for the weekly report.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SetupOutcome {
+    pub id: i64,
+    pub setup_id: String,
+    pub symbol: String,
+    pub direction: String,
+    pub leverage: u32,
+    pub confidence: f64,
+    pub classification: String,
+    pub entry_price: f64,
+    pub stop_loss: f64,
+    pub take_profit_1: f64,
+    pub take_profit_2: f64,
+    pub outcome_label: String,
+    pub pnl_pct: f64,
+    pub detected_at_ms: i64,
+    pub closed_at_ms: i64,
+}
+
+impl Database {
+    /// Persist a marked outcome (F8a). Called from `record_setup_outcome` Tauri cmd.
+    pub fn record_setup_outcome(&self, o: &SetupOutcome) -> Result<i64, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO setup_outcomes (
+                setup_id, symbol, direction, leverage, confidence, classification,
+                entry_price, stop_loss, take_profit_1, take_profit_2,
+                outcome_label, pnl_pct, detected_at_ms, closed_at_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                o.setup_id, o.symbol, o.direction, o.leverage, o.confidence, o.classification,
+                o.entry_price, o.stop_loss, o.take_profit_1, o.take_profit_2,
+                o.outcome_label, o.pnl_pct, o.detected_at_ms, o.closed_at_ms
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Query outcomes within a [start, end) ms range — used by weekly report.
+    pub fn query_setup_outcomes(&self, start_ms: i64, end_ms: i64) -> Vec<SetupOutcome> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT id, setup_id, symbol, direction, leverage, confidence, classification,
+                    entry_price, stop_loss, take_profit_1, take_profit_2,
+                    outcome_label, pnl_pct, detected_at_ms, closed_at_ms
+             FROM setup_outcomes
+             WHERE closed_at_ms >= ?1 AND closed_at_ms < ?2
+             ORDER BY closed_at_ms ASC"
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+
+        stmt.query_map(params![start_ms, end_ms], |row| {
+            Ok(SetupOutcome {
+                id: row.get(0)?,
+                setup_id: row.get(1)?,
+                symbol: row.get(2)?,
+                direction: row.get(3)?,
+                leverage: row.get(4)?,
+                confidence: row.get(5)?,
+                classification: row.get(6)?,
+                entry_price: row.get(7)?,
+                stop_loss: row.get(8)?,
+                take_profit_1: row.get(9)?,
+                take_profit_2: row.get(10)?,
+                outcome_label: row.get(11)?,
+                pnl_pct: row.get(12)?,
+                detected_at_ms: row.get(13)?,
+                closed_at_ms: row.get(14)?,
+            })
+        }).map(|iter| iter.filter_map(|r| r.ok()).collect()).unwrap_or_else(|_| Vec::new())
+    }
 }
 
 #[cfg(test)]

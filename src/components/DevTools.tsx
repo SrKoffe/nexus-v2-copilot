@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { EventBus } from '../analysis/event-bus';
 import { useNexusStore } from '../store';
 import type { NaturalSetup } from '../analysis/leverage-risk';
+import { generateAndSaveWeeklyReport } from '../analysis/report';
 
 /**
  * DevTools — visible only in dev (`import.meta.env.DEV === true`).
@@ -200,12 +201,90 @@ export const DevTools: React.FC = () => {
                 </div>
 
                 <ScalpConfigPanel />
+
+                <ReportPanel />
             </div>
 
             <div style={{ marginTop: '10px', color: '#555', fontSize: '9px', lineHeight: 1.4 }}>
                 Setups use last live price.<br />
                 TP/fee config aplicado em PRÓXIMOS setups injetados.
             </div>
+        </div>
+    );
+};
+
+// ─── Weekly report panel (F8c) ──────────────────────────────────────────────
+
+const ReportPanel: React.FC = () => {
+    const [busy, setBusy] = useState(false);
+    const [result, setResult] = useState<string | null>(null);
+
+    // Default vault path — Roberto's Obsidian Leo-Brain. Can be overridden.
+    const DEFAULT_VAULT = 'C:/Users/betok/Documents/Obsidian/Leo-Brain';
+    const [vaultPath, setVaultPath] = useState(DEFAULT_VAULT);
+
+    const onGenerate = async () => {
+        setBusy(true);
+        setResult(null);
+        try {
+            const r = await generateAndSaveWeeklyReport(vaultPath, new Date());
+            setResult(`✅ ${r.outcomeCount} outcomes → ${r.path}`);
+        } catch (e: any) {
+            setResult(`❌ ${e?.toString() ?? 'unknown error'}`);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div style={{
+            marginTop: '8px',
+            paddingTop: '8px',
+            borderTop: '1px dashed rgba(255,255,255,0.06)',
+        }}>
+            <div style={{ color: '#88ccff', fontSize: '9px', marginBottom: '6px', letterSpacing: '0.5px' }}>
+                WEEKLY REPORT (F8)
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                <span style={{ color: '#888', fontSize: '10px', width: '70px' }}>Vault:</span>
+                <input
+                    type="text"
+                    value={vaultPath}
+                    onChange={(e) => setVaultPath(e.target.value)}
+                    style={{ ...inputStyle, width: '180px', fontSize: '9px' }}
+                    title="Path absoluto pra raiz do vault Obsidian"
+                />
+            </div>
+
+            <button
+                onClick={onGenerate}
+                disabled={busy}
+                style={{
+                    width: '100%',
+                    background: busy ? 'rgba(255,255,255,0.04)' : 'rgba(136,204,255,0.12)',
+                    border: '1px solid rgba(136,204,255,0.4)',
+                    color: '#88ccff',
+                    padding: '6px',
+                    borderRadius: '4px',
+                    cursor: busy ? 'wait' : 'pointer',
+                    fontSize: '11px',
+                    fontFamily: 'inherit',
+                }}
+            >
+                {busy ? 'Gerando…' : '📊 Generate this week'}
+            </button>
+
+            {result && (
+                <div style={{
+                    marginTop: '6px',
+                    fontSize: '9px',
+                    color: result.startsWith('✅') ? '#00ff88' : '#ff7777',
+                    wordBreak: 'break-all',
+                }}>
+                    {result}
+                </div>
+            )}
         </div>
     );
 };

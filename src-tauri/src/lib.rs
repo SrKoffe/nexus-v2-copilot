@@ -182,6 +182,46 @@ fn mexc_keys_configured(state: tauri::State<AppState>) -> bool {
     state.mexc_private.is_some()
 }
 
+// ─── Setup outcomes persistence + weekly report (F8) ───────────────────────
+
+/// Persist a marked outcome with full metadata (symbol, leverage, classification, etc).
+/// Replaces the older minimalistic `record_trade_outcome` for the F8 reporting flow.
+#[tauri::command]
+async fn record_setup_outcome(
+    state: tauri::State<'_, AppState>,
+    outcome: core::database::SetupOutcome,
+) -> Result<i64, String> {
+    // Also feed RiskManager so daily PnL / consecutive-loss lockout updates.
+    {
+        let mut rm = state.risk_manager.lock().await;
+        rm.record_outcome(outcome.pnl_pct / 100.0); // store keeps fraction
+    }
+    state.db.record_setup_outcome(&outcome).map_err(|e| e.to_string())
+}
+
+/// Query outcomes within a [start_ms, end_ms) range. Used by the weekly report.
+#[tauri::command]
+fn query_setup_outcomes(
+    state: tauri::State<AppState>,
+    start_ms: i64,
+    end_ms: i64,
+) -> Vec<core::database::SetupOutcome> {
+    state.db.query_setup_outcomes(start_ms, end_ms)
+}
+
+/// Write a markdown report to a host file path. Used to drop weekly reports
+/// into the user's Obsidian vault (or any path they choose).
+#[tauri::command]
+fn write_report_to_vault(path: String, content: String) -> Result<String, String> {
+    let p = std::path::PathBuf::from(&path);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create dir {:?}: {}", parent, e))?;
+    }
+    std::fs::write(&p, content).map_err(|e| format!("Failed to write {}: {}", path, e))?;
+    Ok(path)
+}
+
 // ─── TAURI ENTRY POINT ─────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -238,6 +278,10 @@ pub fn run() {
             get_mexc_account,
             get_mexc_positions,
             mexc_keys_configured,
+            // F8: outcome persistence + weekly report
+            record_setup_outcome,
+            query_setup_outcomes,
+            write_report_to_vault,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
