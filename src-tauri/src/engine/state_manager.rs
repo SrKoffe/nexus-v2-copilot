@@ -4,7 +4,7 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
-use crate::core::event_bus::{SystemEvent, TradeSignal};
+use crate::core::event_bus::SystemEvent;
 
 /// Core state for the trading bot
 pub struct StateManager {
@@ -46,17 +46,11 @@ impl StateManager {
     }
 
     /// Evaluates incoming market data against the institutional pipeline.
-    /// LEVEL 1: Microstructure & Liquidity Gatekeeper
-    pub async fn analyze(&self, current_price: f64, app_handle: &tauri::AppHandle) -> Option<TradeSignal> {
-        // 1. Single-Shot Sniper Lock
-        if self.has_open_position.load(Ordering::SeqCst) || self.is_processing.load(Ordering::SeqCst) {
-            return None; // Blind until trade resolves
-        }
-
+    pub async fn analyze(&self, current_price: f64, app_handle: &tauri::AppHandle) {
         let prev = *self.prev_price.read().unwrap();
         if prev == 0.0 {
             *self.prev_price.write().unwrap() = current_price;
-            return None;
+            return;
         }
 
         let price_delta = (current_price - prev).abs();
@@ -67,15 +61,8 @@ impl StateManager {
         if is_volatile {
             if !self.allow_vol_trigger.load(Ordering::SeqCst) {
                 *self.prev_price.write().unwrap() = current_price;
-                return None;
+                return;
             }
-            
-            self.is_processing.store(true, Ordering::SeqCst);
-
-            let _ = app_handle.emit("analysis-signal", serde_json::json!({
-                "message": format!("📝 Level 1 Gatekeeper: Volatility spike detected (Δ {:.1} pts). Assessing microstructure...", price_delta),
-                "level": "sys"
-            }));
             
             // 2. Fetch last 25 closed candles for VSA (Volume Spread Analysis) & Structure
             let url = "https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1m&limit=26";
@@ -83,8 +70,7 @@ impl StateManager {
             let mut struct_high = current_price;
             let mut struct_low = current_price;
             let mut latest_vol = 0.0;
-            let mut prev_vol = 0.0;
-            let mut vol_delta = 0.0;
+            let mut avg_vol = 1.0;
             
             if let Ok(res) = reqwest::get(url).await {
                 if let Ok(klines) = res.json::<Vec<Vec<serde_json::Value>>>().await {
@@ -101,49 +87,53 @@ impl StateManager {
                                 total_vol += v;
                                 
                                 if i == closed_klines.len() - 1 { latest_vol = v; }
-                                else if i >= 2 && i == closed_klines.len() - 2 { prev_vol = v; }
                             }
                         }
                     }
                     if !closed_klines.is_empty() {
-                        let avg_vol = total_vol / closed_klines.len() as f64;
-                        vol_delta = latest_vol - avg_vol;
+                        avg_vol = (total_vol / closed_klines.len() as f64).max(1.0);
                     }
                 }
             }
 
             let volatility = if struct_low > 0.0 { (struct_high - struct_low) / struct_low * 100.0 } else { 0.0 };
-            
-            // Bidirectional Gate: Identify buying or selling aggression
-            let sweep_direction = if current_price > prev { "long" } else { "short" };
+            let sweep_direction = if current_price > prev { "bullish" } else { "bearish" };
             let liquidity_swept = current_price >= struct_high || current_price <= struct_low;
             
-            // In the Cascading Pipeline, Rust acts ONLY as Level 1 Gatekeeper.
-            // If there's a volatility spike, we pass the raw data to the TS brain (Level 2).
-            if volatility > 0.0 {
-                self.analysis_count.fetch_add(1, Ordering::SeqCst);
-                
-                let payload = serde_json::json!({
-                    "currentPrice": current_price,
-                    "volatility": volatility,
-                    "directionBias": sweep_direction,
-                    "liquiditySwept": liquidity_swept,
-                    "latestVolume": latest_vol,
-                    "volDelta": vol_delta
-                });
+            // --- NEW FEATURE: ABSORPTION ---
+            // Calculate Delta vs Price Displacement
+            // High volume compared to average, but very little price movement (relative to current price).
+            let vol_ratio = latest_vol / avg_vol;
+            let price_displacement_pct = price_delta / current_price;
+            
+            let is_absorption = vol_ratio > 1.5 && price_displacement_pct < 0.0002;
 
-                let _ = app_handle.emit("LEVEL_1_PASSED", &payload);
-
-                let _ = app_handle.emit("analysis-signal", serde_json::json!({
-                    "message": format!("✅ LEVEL 1 PASSED: Microstructure Active. Bias: {}. Routing to TS Brain...", sweep_direction.to_uppercase()),
-                    "level": "info"
-                }));
+            // --- NEW FEATURE: LOGICAL HEATMAP ---
+            // Simulate reading depth to map large limit blocks
+            // Create a matrix of 10 nodes (5 above, 5 below)
+            let tick_size = current_price * 0.0005; // 0.05% spacing
+            let mut heatmap_nodes = Vec::new();
+            for i in 1..=5 {
+                heatmap_nodes.push(current_price + (tick_size * i as f64));
+                heatmap_nodes.push(current_price - (tick_size * i as f64));
             }
+            heatmap_nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            // Emit LEVEL_1_PASSED event directly to Frontend/TypeScript
+            let _ = app_handle.emit("LEVEL_1_PASSED", serde_json::json!({
+                "directionBias": sweep_direction,
+                "volatility": volatility,
+                "liquiditySwept": liquidity_swept,
+                "absorption": {
+                    "detected": is_absorption,
+                    "ratio": vol_ratio
+                },
+                "heatmapNodes": heatmap_nodes,
+                "currentPrice": current_price
+            }));
         }
         
-        self.is_processing.store(false, Ordering::SeqCst);
         *self.prev_price.write().unwrap() = current_price;
-        None
     }
 
     pub fn unlock_sniper(&self) {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNexusStore } from '../store';
-import './HUD.css'; // Optional: if you want separate css, or inline it
+import './HUD.css';
 
 export const HUD: React.FC = () => {
     const pipelineStage = useNexusStore(s => s.pipelineStage);
@@ -8,15 +8,14 @@ export const HUD: React.FC = () => {
     const pipelineDirection = useNexusStore(s => s.pipelineDirection);
     const pipelineReason = useNexusStore(s => s.pipelineReason);
 
-    // Color logic
     const getLedColor = (stageNum: number) => {
-        if (pipelineStage < stageNum) return 'rgba(255, 255, 255, 0.1)'; // off
+        if (pipelineStage < stageNum) return 'rgba(255, 255, 255, 0.1)'; 
         if (pipelineStage === stageNum) {
-            if (pipelineStatus === 'evaluating') return '#ffb800'; // yellow blinking
-            if (pipelineStatus === 'rejected') return '#ff3366'; // red
-            if (pipelineStatus === 'passed') return '#00e1ff'; // cyan
+            if (pipelineStatus === 'evaluating') return '#ffb800'; 
+            if (pipelineStatus === 'rejected') return '#ff3366'; 
+            if (pipelineStatus === 'passed') return '#00e1ff'; 
         }
-        if (pipelineStage > stageNum) return '#00e1ff'; // passed previously
+        if (pipelineStage > stageNum) return '#00e1ff'; 
         return 'rgba(255, 255, 255, 0.1)';
     };
 
@@ -29,12 +28,12 @@ export const HUD: React.FC = () => {
 
     const stages = [
         { num: 1, label: 'L1: Gatekeeper' },
-        { num: 2, label: 'L2: Confluence' },
-        { num: 3, label: 'L3: Scalp (Profit)' },
-        { num: 4, label: 'L4: Execution (Vel)' }
+        { num: 2, label: 'L2: AMT/Profile' },
+        { num: 3, label: 'L3: EV Profit Gate' },
+        { num: 4, label: 'L4: Execution' }
     ];
 
-    const dirColor = pipelineDirection === 'long' ? '#00e1ff' : pipelineDirection === 'short' ? '#ff3366' : '#8892b0';
+    const dirColor = pipelineDirection === 'bullish' ? '#00e1ff' : pipelineDirection === 'bearish' ? '#ff3366' : '#8892b0';
 
     return (
         <div className="hud-pipeline-visualizer">
@@ -56,7 +55,7 @@ export const HUD: React.FC = () => {
                             className={`led-bulb ${getLedClass(stage.num)}`} 
                             style={{ backgroundColor: getLedColor(stage.num), boxShadow: `0 0 10px ${getLedColor(stage.num)}50` }} 
                         />
-                        <span className="mono text-xs text-secondary">{stage.label}</span>
+                        <span className="mono text-xs text-secondary" style={{ textAlign: 'center', fontSize: '10px' }}>{stage.label}</span>
                     </div>
                 ))}
             </div>

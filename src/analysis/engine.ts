@@ -20,30 +20,36 @@ export class MasterAnalysisEngine {
     init() {
         if (this.isInitialized) return;
 
-        console.log('[MAESTRO v2] Initializing Institutional Pipeline (Cascading L2)...');
+        console.log('[MAESTRO v2] Initializing Institutional Pipeline...');
 
-        // Level 2: Listen for Level 1 Gatekeeper approval
-        EventBus.on('LEVEL_1_PASSED', (l1Data) => {
-            this.analyze(l1Data);
+        // v3.0: Optimized trigger system (Price Movement based)
+        EventBus.on('TICK_UPDATE', (data) => {
+            this.analyze(data);
+        });
+
+        EventBus.on('CANDLE_CLOSE', (data) => {
+            this.analyze(data, true); // Force on candle close
         });
 
         this.isInitialized = true;
     }
 
-    async analyze(l1Data) {
-        // Level 2 expects L1 data + access to candleManager
-        const { candles1m } = require('./candle-manager').candleManager;
-        if (!candles1m || candles1m.length === 0) return null;
+    async analyze(marketData, force = false) {
+        if (!marketData || !marketData.candles1m) return null;
 
-        const candles = candles1m;
-        const currentPrice = l1Data.currentPrice;
+        const candles = marketData.candles1m;
+        const currentPrice = marketData.price || 
+                           (candles.length > 0 ? candles[candles.length - 1].close : 0);
 
+        // --- CPU OPTIMIZATION GATING ---
+        if (!force && this.lastAnalysisPrice > 0) {
+            const move = Math.abs(currentPrice - this.lastAnalysisPrice) / this.lastAnalysisPrice;
+            if (move < 0.0005) return null; // 0.05% change threshold
+        }
         this.lastAnalysisPrice = currentPrice;
 
-        const store = require('../store').useNexusStore;
-        store.getState().setPipelineStage(2, 'evaluating', l1Data.directionBias, 'Evaluating Confluence...');
-
         try {
+
             // 1. Run Engines
             const mse = MarketStateEngine.analyze(candles);
             const ill = LiquidityEngine.analyze(candles);
@@ -59,7 +65,7 @@ export class MasterAnalysisEngine {
                 vwap: Indicators.VWAP(candles)
             };
 
-            // 3. Confluence Scoring (Bidirectional)
+            // 3. Confluence Scoring
             const confluenceResult = ConfluenceEngine.calculate(
                 indicators, 
                 {}, // patterns
@@ -67,89 +73,52 @@ export class MasterAnalysisEngine {
                 { marketState: mse, liquidity: ill, volumeProfile: vpe }
             );
 
-            // Level 2 Bidirectional Validation
-            // We evaluate both LONG and SHORT setups.
-            let direction = this._resolveDirection(mse, ill, confluenceResult);
-            
-            // Bias from L1 microstructure
-            const l1Bias = l1Data.directionBias;
-            if (direction.bias !== 'neutral' && direction.bias !== l1Bias) {
-                console.log(`[LEVEL 2] Confluence direction (${direction.bias}) conflicts with L1 microstructure bias (${l1Bias}). Discarding.`);
-                store.getState().setPipelineStage(2, 'rejected', l1Bias, `Direction conflict (L1=${l1Bias}, L2=${direction.bias})`);
-                return null; // Conflict between L1 microstructure and L2 macro
-            }
-            
-            let confidence = confluenceResult.confidence;
-            
-            // Correlation Penalty: if multiple order-flow signals align too perfectly, 
-            // penalize slightly to prevent artificial confidence inflation.
-            // L1 Volatility + L1 Swept + High MACD + RSI
-            let correlatedSignals = 0;
-            if (l1Data.liquiditySwept) correlatedSignals++;
-            if (l1Data.volatility > 0.05) correlatedSignals++;
-            if (indicators.rsi && (indicators.rsi > 70 || indicators.rsi < 30)) correlatedSignals++;
-            
-            if (correlatedSignals >= 3) {
-                console.log(`[LEVEL 2] Applying correlation penalty (0.8x) due to ${correlatedSignals} stacked signals.`);
-                confidence *= 0.8;
-            }
+            const probability = confluenceResult.confidence / 100;
+            const direction = this._resolveDirection(mse, ill, confluenceResult);
 
-            const probability = confidence / 100;
-
-            // Baseline Level 2 threshold (Level 3 will refine this dynamically based on leverage)
-            const baseL2Threshold = 0.50; 
-            
-            if (probability < baseL2Threshold || direction.bias === 'neutral') {
-                store.getState().setPipelineStage(2, 'rejected', l1Bias, `Low Confluence (${Math.round(probability * 100)}%)`);
-                return null;
-            }
-
-            store.getState().setPipelineStage(2, 'passed', direction.bias, `High Confluence (${Math.round(probability * 100)}%)`);
-
-            // 4. Build Signal (Level 2 Passed)
+            // 4. Build Signal
             const finalSignal = {
                 timestamp: Date.now(),
                 direction: direction.bias,
-                probability: probability,
+                probability: confluenceResult.confidence / 100,
                 score: confluenceResult.score,
                 source: direction.source,
                 classification: confluenceResult.classification?.label || 'Neutral',
                 breakdown: confluenceResult.breakdown,
-                l1Data: l1Data, // Pass L1 data down the pipeline
                 mse: { 
                     regime: mse.regime?.current, 
                     strength: mse.regime?.confidence 
+                },
+                ill: { 
+                    sweeps: ill.sweeps?.length || 0,
+                    confirmed: ill.sweeps?.filter(s => s.confirmed).length || 0
                 }
             };
 
-            console.log(`🎯 [LEVEL 2] Directional Confluence: ${finalSignal.direction.toUpperCase()} (${(finalSignal.probability * 100).toFixed(0)}%)`);
+            console.log(`🎯 [Analysis] Signal: ${finalSignal.direction.toUpperCase()} (${(finalSignal.probability * 100).toFixed(0)}%) | Source: ${finalSignal.source}`);
+            if (confluenceResult.score !== 0) {
+                console.log(`📊 [Confluence] Score: ${confluenceResult.score} | Confidence: ${confluenceResult.confidence}%`);
+            }
 
-            // EventBus.emit('ANALYSIS_SIGNAL', finalSignal); // Keep for UI logs if needed
+            EventBus.emit('ANALYSIS_SIGNAL', finalSignal);
+
+            // 5. Execution Gate: Dynamic Thresholds
+            const regime = mse.regime?.current || 'range';
+            const volScore = ScalpEngine._state?.lastVolatilityScore || 50;
             
-            if (!this.isProcessing) {
-                console.log(`✅ [LEVEL 2] PASSED. Emitting to Level 3 (Profit Gate & Dynamic Leverage)...`);
-                
-                // Emitting to Level 3
-                this.isProcessing = true;
-                const naturalSetup = {
-                    id: `setup_${Date.now()}`,
-                    symbol: 'BTC_USDT',
-                    direction: direction.bias,
-                    entryPrice: currentPrice,
-                    confidence: probability,
-                    reason: 'Level 2 Bidirectional Confluence',
-                    timestamp: Date.now(),
-                    l1Data: l1Data
-                };
-                
-                EventBus.emit('LEVEL_2_PASSED', naturalSetup);
-                
-                setTimeout(() => { this.isProcessing = false; }, 100);
+            // Adapt threshold to market conditions
+            let executionThreshold = 0.65; // Standard
+            if (volScore > 70) executionThreshold = 0.75; // Pre-news / High noise filter
+            if (regime === 'range') executionThreshold = 0.55; // Earlier entry in accumulation
+
+            if (probability >= executionThreshold && direction.bias !== 'neutral' && !this.isProcessing) {
+                console.log(`🚀 [EXECUTION] Threshold reached (${(probability*100).toFixed(0)}% >= ${(executionThreshold*100).toFixed(0)}%)`);
+                await this._executeTrade(direction.bias, probability, currentPrice);
             }
 
             return finalSignal;
         } catch (error) {
-            console.error('[MAESTRO] L2 Analysis error:', error);
+            console.error('[MAESTRO] Analysis error:', error);
             return null;
         }
     }
@@ -178,7 +147,84 @@ export class MasterAnalysisEngine {
         return { bias: 'neutral', source: 'Neutral' };
     }
 
+    processLevel1Signal(payload) {
+        // Level 2: Confluence & AMT Spatial Validation
+        const { useNexusStore } = require('../store');
+        const setStatus = useNexusStore.getState().updatePipelineStatus;
+        
+        setStatus(2, 'evaluating', payload.directionBias, 'Validating AMT...');
 
+        // In a real scenario we use VolumeProfile.getSummary(vpResult)
+        // Here we mock the VPE levels around the current price for demonstration if VPE is empty
+        const cp = payload.currentPrice;
+        const vpe = {
+            poc: cp * 0.9995, // mock below
+            vah: cp * 1.002,
+            val: cp * 0.998
+        };
+
+        const l1Direction = payload.directionBias;
+        const isAbsorption = payload.absorption?.detected;
+        let isApproved = false;
+        let reason = '';
+
+        if (l1Direction === 'bullish') {
+            if (isAbsorption && cp <= vpe.val) {
+                isApproved = true;
+                reason = 'Bullish absorption at VAL';
+            } else if (cp > vpe.poc) {
+                isApproved = true;
+                reason = 'Momentum above POC';
+            }
+        } else {
+            if (isAbsorption && cp >= vpe.vah) {
+                isApproved = true;
+                reason = 'Bearish absorption at VAH';
+            } else if (cp < vpe.poc) {
+                isApproved = true;
+                reason = 'Momentum below POC';
+            }
+        }
+
+        if (isApproved) {
+            setStatus(2, 'passed', l1Direction, reason);
+            EventBus.emit('LEVEL_2_PASSED', {
+                ...payload,
+                amt: vpe,
+                l2Reason: reason
+            });
+        } else {
+            setStatus(2, 'rejected', l1Direction, 'AMT Spatial Rejection: No Edge');
+        }
+    }
+
+    async _executeTrade(direction, score, price) {
+        this.isProcessing = true;
+        try {
+            const setup = ScalpEngine.calculateSetup(direction);
+            
+            const signal = {
+                id: `sig_${Date.now()}`,
+                symbol: 'BTCUSDT',
+                direction: direction,
+                entry_price: price,
+                quantity: 0.01, // Placeholder, should be calculated from balance
+                stop_loss: setup.stopLoss,
+                take_profit: setup.takeProfit,
+                reason: 'Institutional Confluence',
+                score: score,
+                is_bracket: true
+            };
+
+            console.log('[MAESTRO] Triggering Trade:', signal);
+            await invoke('execute_auto_order', { signal });
+            
+        } catch (error) {
+            console.error('[MAESTRO] Execution error:', error);
+        } finally {
+            this.isProcessing = false;
+        }
+    }
 }
 
 export const maestro = new MasterAnalysisEngine();

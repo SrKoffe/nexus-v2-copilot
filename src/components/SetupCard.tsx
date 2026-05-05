@@ -1,246 +1,78 @@
-import React, { useMemo } from 'react';
-import { useNexusStore, computeRejectionCounts } from '../store';
-import type { AdjustedSetup, RejectedSetup } from '../analysis/leverage-risk';
+import React from 'react';
+import { useNexusStore } from '../store';
 
-/**
- * SetupCard — replaces the old OrderPanel.
- *
- * Shows the most recent setup detected by Maestro, recomputed for the user's
- * selected leverage. NEVER places orders. Roberto reviews and decides; if he
- * trades it manually on MEXC, he hits "Mark as my trade" so the system can
- * later track outcome and refine.
- */
 export const SetupCard: React.FC = () => {
-    const pending = useNexusStore(s => s.pendingSetup);
-    const leverage = useNexusStore(s => s.leverage);
-    const balance = useNexusStore(s => s.balanceUsd);
-    const markActive = useNexusStore(s => s.markPendingAsActive);
-    const history = useNexusStore(s => s.history);
-
-    // Computed locally with useMemo — avoids the "new object every render" infinite loop
-    // that happens when a Zustand selector returns a fresh object.
-    const rejectionCounts = useMemo(() => computeRejectionCounts(history), [history]);
-
-    if (!pending) {
+    const pendingSetup = useNexusStore(s => s.pendingSetup);
+    const pipelineStatus = useNexusStore(s => s.pipelineStatus);
+    const pipelineStage = useNexusStore(s => s.pipelineStage);
+    
+    if (pipelineStage < 4 || pipelineStatus !== 'passed' || !pendingSetup) {
         return (
-            <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100%',
-                color: '#555',
-                gap: '8px',
-            }}>
-                <span style={{ fontSize: '24px', opacity: 0.4 }}>⌖</span>
-                <span className="text-sm">Watching markets — no setup yet</span>
-                <span className="text-xs text-secondary">Leverage: {leverage}x · Balance: ${balance.toFixed(0)}</span>
-                {Object.keys(rejectionCounts).length > 0 && (
-                    <div className="mono text-xs" style={{ marginTop: '12px', textAlign: 'center', color: '#666' }}>
-                        Rejected (session):
-                        {Object.entries(rejectionCounts).map(([code, n]) => (
-                            <div key={code}>· {n}× {code.toLowerCase().replace(/_/g, ' ')}</div>
-                        ))}
-                    </div>
-                )}
+            <div style={{ padding: '20px', textAlign: 'center', color: '#8892b0' }} className="mono text-sm">
+                Pipeline executing... Waiting for setup.
             </div>
         );
     }
 
-    if (!pending.adjusted.accepted) {
-        return <RejectedView setup={pending.adjusted} naturalSymbol={pending.natural.symbol} />;
-    }
+    const setup = pendingSetup.adjusted || pendingSetup.natural;
+    if (!setup) return null;
 
-    return <AcceptedView setup={pending.adjusted} onTake={markActive} />;
-};
-
-// ─── Accepted setup ─────────────────────────────────────────────────────────
-
-const AcceptedView: React.FC<{ setup: AdjustedSetup; onTake: () => void }> = ({ setup, onTake }) => {
-    const isLong = setup.direction === 'long';
-    const accent = isLong ? '#00ff88' : '#ff4444';
-    const dirLabel = isLong ? 'LONG' : 'SHORT';
-    const dirArrow = isLong ? '↑' : '↓';
-
-    const grade = classify(setup);
+    const isLong = setup.direction === 'bullish';
+    const color = isLong ? '#00e1ff' : '#ff3366';
 
     return (
-        <div style={{ padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>
-            {/* Direction + grade */}
+        <div style={{ background: 'rgba(10,15,25,0.6)', border: `1px solid ${color}50`, borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="mono" style={{ fontSize: '20px', color: accent, fontWeight: 'bold', letterSpacing: '1px' }}>
-                    {dirArrow} {dirLabel}
+                <span className="mono" style={{ color: color, fontWeight: 'bold', fontSize: '1.2rem' }}>
+                    {isLong ? 'LONG' : 'SHORT'} {setup.symbol}
                 </span>
-                <span style={{
-                    background: `${accent}1a`,
-                    border: `1px solid ${accent}`,
-                    color: accent,
-                    padding: '3px 8px',
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                }}>
-                    {grade}
+                <span className="mono text-xs" style={{ background: `${color}20`, padding: '4px 8px', borderRadius: '4px', color }}>
+                    CONFIDENCE: {(setup.confidence * 100).toFixed(0)}%
                 </span>
             </div>
 
-            {/* Symbol + leverage */}
-            <div className="mono text-sm text-secondary" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>{setup.symbol}</span>
-                <span>{setup.leverage}x · conf {(setup.confidence * 100).toFixed(0)}%</span>
-            </div>
-
-            {/* Entry / SL / TP — scalper model: TP em margin-PnL net */}
-            <div style={{
-                background: 'rgba(255,255,255,0.02)',
-                border: '1px solid rgba(255,255,255,0.05)',
-                borderRadius: '8px',
-                padding: '12px',
-                fontFamily: 'JetBrains Mono, monospace',
-                fontSize: '12px',
-                backdropFilter: 'blur(10px)',
-                boxShadow: 'inset 0 0 15px rgba(255,255,255,0.01)'
-            }}>
-                <Row label="Entry" value={`$${setup.entryPrice.toFixed(1)}`} color="#fff" />
-                <Row label="SL"
-                     value={`$${setup.stopLoss.toFixed(1)}  (-${setup.stopLossPct.toFixed(2)}% / −${setup.stopLossMarginPct.toFixed(0)}% margem)`}
-                     color="#ff4444" />
-                <Row label={`Target (+${setup.takeProfit1MarginNet}% net)`}
-                     value={`$${setup.takeProfit1.toFixed(1)}  (+${setup.takeProfit1Pct.toFixed(3)}%)`}
-                     color="#00ff88" />
-                <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)', margin: '8px 0' }} />
-                <Row label="Fees (round-trip)"
-                     value={`-${setup.feesMarginPct.toFixed(2)}% margem`}
-                     color="#ffaa00" />
-                <Row label="Break-even WR"
-                     value={`${(setup.breakEvenWinRate * 100).toFixed(0)}% (conf ${(setup.confidence * 100).toFixed(0)}%)`}
-                     color={setup.breakEvenWinRate <= setup.confidence ? '#00ff88' : '#ff4444'} />
-                <Row label="Survival"
-                     value={`${(setup.survivalScore * 100).toFixed(0)}%`}
-                     color={setup.survivalScore >= 0.85 ? '#00ff88' : '#ffaa00'} />
-                <Row label="Margin / Notional"
-                     value={`$${setup.positionSizeUsd.toFixed(2)} / $${setup.notionalUsd.toFixed(0)}`}
-                     color="#aaa" />
-            </div>
-
-            {/* Reason */}
-            <div className="text-xs text-secondary" style={{ fontStyle: 'italic', opacity: 0.7 }}>
-                {setup.reason}
-            </div>
-
-            {/* Warnings */}
-            {setup.warnings.length > 0 && (
-                <div style={{
-                    background: 'rgba(255, 170, 0, 0.06)',
-                    border: '1px solid rgba(255, 170, 0, 0.25)',
-                    borderRadius: '4px',
-                    padding: '6px 10px',
-                    fontSize: '11px',
-                    color: '#ffcc55',
-                }}>
-                    {setup.warnings.map((w, i) => (
-                        <div key={i}>⚠ {w}</div>
-                    ))}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '4px' }}>
+                    <div className="text-secondary mono text-xs">ENTRY</div>
+                    <div className="mono text-md" style={{ color: '#fff' }}>${setup.entryPrice.toFixed(1)}</div>
                 </div>
-            )}
-
-            {/* Actions */}
-            <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <button
-                    onClick={onTake}
-                    style={{
-                        background: `linear-gradient(135deg, ${accent}33 0%, ${accent}10 100%)`,
-                        border: `1px solid ${accent}`,
-                        color: accent,
-                        padding: '10px',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontWeight: 'bold',
-                        fontSize: '13px',
-                        letterSpacing: '0.5px',
-                    }}
-                >
-                    ✓ I'm taking this trade
-                </button>
-                <span className="text-xs text-secondary" style={{ textAlign: 'center', opacity: 0.5 }}>
-                    Execute manually on MEXC, then mark outcome below
-                </span>
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '4px' }}>
+                    <div className="text-secondary mono text-xs">TARGET (AMT)</div>
+                    <div className="mono text-md" style={{ color: '#00e1ff' }}>${setup.takeProfit1.toFixed(1)}</div>
+                    <div className="mono text-xs" style={{ color: '#00e1ff' }}>+{setup.takeProfit1Pct.toFixed(2)}%</div>
+                </div>
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '4px' }}>
+                    <div className="text-secondary mono text-xs">STOP LOSS</div>
+                    <div className="mono text-md" style={{ color: '#ff3366' }}>${setup.stopLoss.toFixed(1)}</div>
+                    <div className="mono text-xs" style={{ color: '#ff3366' }}>-{setup.stopLossPct.toFixed(2)}%</div>
+                </div>
             </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '12px' }}>
+                <div className="mono text-xs text-secondary">
+                    EV / COSTS: <span style={{ color: '#ffb800' }}>{setup.feesMarginPct}%</span>
+                </div>
+                <div className="mono text-xs text-secondary">
+                    LEVERAGE: <span style={{ color: '#fff' }}>{setup.leverage}x</span>
+                </div>
+                <div className="mono text-xs text-secondary">
+                    REASON: <span style={{ color: '#fff' }}>{setup.reason}</span>
+                </div>
+            </div>
+            
+            <button style={{
+                background: `${color}20`,
+                color: color,
+                border: `1px solid ${color}`,
+                padding: '10px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontFamily: 'JetBrains Mono',
+                marginTop: '8px'
+            }}>
+                EXECUTE ORDER
+            </button>
         </div>
     );
 };
-
-// ─── Rejected setup ─────────────────────────────────────────────────────────
-
-const RejectedView: React.FC<{ setup: RejectedSetup; naturalSymbol: string }> = ({ setup, naturalSymbol }) => {
-    return (
-        <div style={{
-            padding: '8px 4px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
-            height: '100%',
-        }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="mono" style={{ fontSize: '14px', color: '#888' }}>{naturalSymbol}</span>
-                <span style={{
-                    background: 'rgba(136,136,136,0.1)',
-                    color: '#888',
-                    padding: '3px 8px',
-                    borderRadius: '4px',
-                    fontSize: '10px',
-                    fontWeight: 'bold',
-                }}>
-                    REJECTED
-                </span>
-            </div>
-
-            <div style={{
-                background: 'rgba(255, 68, 68, 0.04)',
-                border: '1px solid rgba(255, 68, 68, 0.15)',
-                borderRadius: '6px',
-                padding: '12px',
-                fontSize: '12px',
-                color: '#aaa',
-            }}>
-                <div style={{ color: '#ff7777', fontWeight: 'bold', marginBottom: '6px', fontSize: '11px', letterSpacing: '0.5px' }}>
-                    {setup.code}
-                </div>
-                {setup.reason}
-            </div>
-
-            <div className="text-xs text-secondary" style={{ marginTop: 'auto', textAlign: 'center', opacity: 0.5 }}>
-                Watching for next setup...
-            </div>
-        </div>
-    );
-};
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-const Row: React.FC<{ label: string; value: string; color: string }> = ({ label, value, color }) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-        <span style={{ color: '#888', fontSize: '11px' }}>{label}</span>
-        <span style={{ color, fontWeight: 600 }}>{value}</span>
-    </div>
-);
-
-/**
- * Classify quality based on:
- *   - confidence (analytical edge)
- *   - survivalScore (room until liquidation)
- *   - confidence margin over break-even WR (statistical edge)
- *
- * In the scalper model, RR is replaced by `(confidence - breakEvenWR)` —
- * how far above the break-even point the analysis predicts.
- */
-function classify(setup: AdjustedSetup): string {
-    const c = setup.confidence;
-    const s = setup.survivalScore;
-    const edge = c - setup.breakEvenWinRate;  // statistical edge
-
-    if (c >= 0.75 && s >= 0.85 && edge >= 0.15) return 'A+';
-    if (c >= 0.65 && s >= 0.80 && edge >= 0.05) return 'A';
-    if (c >= 0.55 && s >= 0.70 && edge >= 0.00) return 'B';
-    return 'C';
-}

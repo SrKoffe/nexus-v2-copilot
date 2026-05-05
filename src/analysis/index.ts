@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { listen } from '@tauri-apps/api/event';
-import { invoke } from '@tauri-apps/api/core';
 import { EventBus } from './event-bus';
 import { candleManager } from './candle-manager';
 import { maestro } from './engine';
@@ -9,10 +8,10 @@ import { maestro } from './engine';
  * ═══════════════════════════════════════════════════════════════════════════════
  * ANALYSIS PIPELINE — ENTRY POINT
  * ═══════════════════════════════════════════════════════════════════════════════
- *
- * Connects the Tauri Rust backend events to the TypeScript analysis engines.
- * Real-time data flow from MEXC futures WebSocket → ConfluenceEngine 2.0
- * (8-dimension institutional pipeline) → frontend signals.
+ * 
+ * This module connects the Tauri Rust backend events to the TypeScript analysis
+ * engines. It handles the real-time data flow from the Binance WebSocket 
+ * through the institutional intelligence pipeline.
  */
 
 export async function initAnalysisPipeline() {
@@ -20,14 +19,16 @@ export async function initAnalysisPipeline() {
 
     // 1. Initialize Engines
     maestro.init();
+    const { ScalpEngine } = require('./scalp-engine');
+    ScalpEngine.init();
 
     // 1.5 Fetch History to Bootstrap Indicators/Engines
     try {
-        console.log('⏳ [Analysis] Fetching historical data (200m from MEXC)...');
-        const history = await invoke('fetch_historical_candles', {
-            symbol: 'BTC_USDT',   // MEXC contract format (underscore)
-            interval: 'Min1',     // MEXC interval label
-            limit: 200
+        console.log('⏳ [Analysis] Fetching historical data (200m)...');
+        const history = await invoke('fetch_historical_candles', { 
+            symbol: 'BTCUSDT', 
+            interval: '1m', 
+            limit: 200 
         });
         
         if (history && history.length > 0) {
@@ -53,23 +54,6 @@ export async function initAnalysisPipeline() {
         EventBus.emit('MARKET_TICK', tick);
     });
 
-    const unlistenLevel1 = await listen('LEVEL_1_PASSED', (event) => {
-        const payload = event.payload as any;
-        
-        // ─── PIPELINE HUD ───
-        const store = require('../store').useNexusStore;
-        store.getState().setPipelineStage(1, 'passed', payload.directionBias, 'Microstructure Active');
-        
-        EventBus.emit('LEVEL_1_PASSED', payload);
-        
-        // Auto-reset HUD after 2 seconds if pipeline doesn't progress to a full setup
-        setTimeout(() => {
-            if (store.getState().pipelineStage !== 4) {
-                store.getState().setPipelineStage(0, 'idle', null, null);
-            }
-        }, 2000);
-    });
-
     // 3. Listen for Order Events (to unlock sniper/update state)
     const unlistenOrderFilled = await listen('order-filled', (event) => {
         console.log('🎯 [Analysis] Order Filled:', event.payload);
@@ -81,12 +65,24 @@ export async function initAnalysisPipeline() {
         EventBus.emit('TRADE_CLOSED', event.payload);
     });
 
+    // 4. Cascading Pipeline Listeners
+    const unlistenLevel1 = await listen('LEVEL_1_PASSED', (event) => {
+        const payload = event.payload;
+        // console.log('🔥 [Level 1] Microstructure Gatekeeper Passed:', payload);
+        EventBus.emit('LEVEL_1_PASSED', payload);
+        // Let L2 engine process it
+        if (maestro.processLevel1Signal) {
+            maestro.processLevel1Signal(payload);
+        }
+    });
+
     console.log('✅ [Analysis] Pipeline Online & Listening to Tauri events.');
 
+    // Return cleanup functions
     return () => {
         unlistenMarketTick();
-        unlistenLevel1();
         unlistenOrderFilled();
         unlistenTradeClosed();
+        unlistenLevel1();
     };
 }
