@@ -17,6 +17,7 @@ import './App.css';
 import { initAnalysisPipeline } from './analysis';
 import { EventBus } from './analysis/event-bus';
 import { LeverageAdjustedRiskEngine, DEFAULT_CONFIG, type NaturalSetup } from './analysis/leverage-risk';
+import { ScalpEngine } from './analysis/scalp-engine';
 import { useNexusStore } from './store';
 
 /**
@@ -100,10 +101,50 @@ function App() {
 
         EventBus.on('SETUP_DETECTED', handleSetup);
 
+        // FIX C1: Sync bridge — ScalpEngine emits SCALP_SETUP with engine state
+        // after every handleEvent(). We push that state into the Zustand store
+        // so ALL UI panels (mode badge, velocity, PnL, checklist) see REAL data.
+        const handleScalpUpdate = (payload: any) => {
+            const syncState = useNexusStore.getState().syncEngineState;
+            if (payload && syncState) {
+                // The SCALP_SETUP event includes the full handleEvent return
+                const engineResult = payload._engineState || payload;
+                syncState({
+                    operatingMode: engineResult.operatingMode || payload.operatingMode,
+                    velocityState: engineResult.velocityState || { tradesPerMinute: 0, sizeReduction: 1.0 },
+                    netPnlSession: engineResult.netPnlSession ?? 0,
+                    totalFeesSession: engineResult.totalFeesSession ?? 0,
+                });
+            }
+        };
+        EventBus.on('SCALP_SETUP', handleScalpUpdate);
+
+        // Also sync on every ANALYSIS_SIGNAL for continuous mode/velocity updates
+        // even when no setup is emitted (keeps header mode badge accurate).
+        const handleAnalysisSync = () => {
+            // Read directly from ScalpEngine state (lightweight — no computation)
+            if (typeof ScalpEngine !== 'undefined' && ScalpEngine._state) {
+                const s = ScalpEngine._state;
+                const perf = ScalpEngine._performance;
+                useNexusStore.getState().syncEngineState({
+                    operatingMode: s.currentMode || 'swing_scalp',
+                    velocityState: {
+                        tradesPerMinute: s.recentTradeTimestamps?.filter((t: number) => Date.now() - t < 60000).length || 0,
+                        sizeReduction: s.velocityReduction ?? 1.0,
+                    },
+                    netPnlSession: perf?.netPnl ?? 0,
+                    totalFeesSession: perf?.totalFeesPaid ?? 0,
+                });
+            }
+        };
+        EventBus.on('ANALYSIS_SIGNAL', handleAnalysisSync);
+
         return () => {
             if (cleanup) cleanup();
             unlistenPromise.then(u => u());
             EventBus.off?.('SETUP_DETECTED', handleSetup);
+            EventBus.off?.('SCALP_SETUP', handleScalpUpdate);
+            EventBus.off?.('ANALYSIS_SIGNAL', handleAnalysisSync);
         };
     }, [setPendingSetup, addToHistory]);
 

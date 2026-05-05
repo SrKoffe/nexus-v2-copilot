@@ -301,13 +301,9 @@ export const LeverageAdjustedRiskEngine = {
             };
         }
 
-        // ─── 7. Break-even win rate ───
-        // Em parcial 50/50 (TP1 50%, TP2 50%):
-        //   E[win] = 0.5 × tp1_net + 0.5 × tp2_net
-        //   E[loss] = sl_margin + fees_margin (SL hit também paga fees)
-        //   Breakeven WR: WR × E[win] = (1-WR) × E[loss]
-        //              → WR = E[loss] / (E[win] + E[loss])
-        const expectedWin = 0.5 * config.tp1TargetNetMarginPct + 0.5 * config.tp2TargetNetMarginPct;
+        // FIX H2: Use EFFECTIVE (capped) TP targets for break-even calculation,
+        // not the raw config values which are uncapped and too optimistic at high leverage.
+        const expectedWin = 0.5 * effectiveTp1Net + 0.5 * effectiveTp2Net;
         const expectedLoss = slMarginPct + feesMarginPct;
         const breakEvenWinRate = expectedLoss / (expectedWin + expectedLoss);
 
@@ -318,9 +314,12 @@ export const LeverageAdjustedRiskEngine = {
         const takeProfit2 = setup.entryPrice * (1 - dirSign * (tp2PricePct / 100));
 
         // ─── 9. Position sizing ───
+        // FIX H6: positionSizeUsd = MARGIN used, not notional.
+        // riskAmountUsd / (slFinalPct / 100) = notional → divide by leverage for margin.
         const riskAmountUsd = balanceUsd * config.riskPerTrade;
-        const positionSizeUsd = (riskAmountUsd / slFinalPct) * 100;
-        const notionalUsd = positionSizeUsd * leverage;
+        const notionalFromRisk = (riskAmountUsd / slFinalPct) * 100;
+        const positionSizeUsd = notionalFromRisk / leverage; // margin = notional / leverage
+        const notionalUsd = notionalFromRisk;
 
         // ─── 10. Warnings ───
         const warnings: string[] = [];

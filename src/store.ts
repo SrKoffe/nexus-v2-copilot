@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { NaturalSetup, AdjustedSetup, SetupResult } from './analysis/leverage-risk';
+import { ScalpEngine } from './analysis/scalp-engine';
 
 /**
  * Zustand store for Nexus V2 Co-Pilot.
@@ -83,6 +84,17 @@ interface NexusState {
     netPnlSession: number;
     totalFeesSession: number;
     setSessionPnl: (net: number, fees: number) => void;
+
+    /**
+     * FIX C1: Sync bridge — called after each ScalpEngine.handleEvent() return.
+     * Pushes engine state into the store so UI panels read REAL data.
+     */
+    syncEngineState: (engineResult: {
+        operatingMode: string;
+        velocityState: { tradesPerMinute: number; sizeReduction: number };
+        netPnlSession: number;
+        totalFeesSession: number;
+    }) => void;
 }
 
 /**
@@ -127,6 +139,13 @@ export const useNexusStore = create<NexusState>((set, get) => ({
     markPendingAsActive: () => {
         const pending = get().pendingSetup;
         if (!pending || !pending.adjusted.accepted) return;
+        // FIX C6: Record ACTUAL trade emission for velocity control.
+        // This fires ONLY when the user confirms "I'm taking this trade",
+        // not when a signal is generated.
+        const adj = pending.adjusted as any;
+        if (adj.direction && typeof ScalpEngine !== 'undefined') {
+            ScalpEngine.recordUserTradeEmission(adj.direction);
+        }
         set({ activeSetup: pending, pendingSetup: null });
     },
     clearActive: () => set({ activeSetup: null }),
@@ -181,4 +200,12 @@ export const useNexusStore = create<NexusState>((set, get) => ({
     netPnlSession: 0,
     totalFeesSession: 0,
     setSessionPnl: (net, fees) => set({ netPnlSession: net, totalFeesSession: fees }),
+
+    // FIX C1: Sync bridge — pushes ScalpEngine state into store
+    syncEngineState: (r) => set({
+        operatingMode: (r.operatingMode as 'swing_scalp' | 'hybrid' | 'micro_scalp') || 'swing_scalp',
+        velocityState: r.velocityState || { tradesPerMinute: 0, sizeReduction: 1.0 },
+        netPnlSession: r.netPnlSession ?? 0,
+        totalFeesSession: r.totalFeesSession ?? 0,
+    }),
 }));

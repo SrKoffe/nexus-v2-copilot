@@ -247,36 +247,91 @@ export const ScalpEngine = {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * Hard gate: reject setups where expected profit doesn't cover fees.
+     * Hard gate: reject setups where expected profit doesn't cover fees + slippage.
      * At x100, round-trip fees = 0.04% × 2 × 100 = 8% of margin.
-     * Expected margin PnL must exceed profitGateMultiplier × fees.
+     * Expected NET margin PnL must exceed 1.2× total costs (fees + slippage).
+     *
+     * FIX C7: Uses leverage-risk TP net targets instead of mode targetPct,
+     * which was too small for micro_scalp at x100+ and caused 100% rejection.
      */
     _profitGate(setup) {
         const leverage = this._state.currentLeverage || 10;
         const feePct = (this._config.takerFeePct || 0.04) * 2; // round-trip % of notional
         const feeMarginPct = feePct * leverage; // fees as % of margin
 
-        // Estimate expected price move from TP1
+        // Estimate slippage (new: slippage model)
+        const slippageMarginPct = this._estimateSlippage() * leverage;
+        const totalCostMarginPct = feeMarginPct + slippageMarginPct;
+
+        // FIX C7: Compute expected margin PnL from the leverage-risk TP target,
+        // NOT from the mode's raw targetPct (which is too small at high leverage).
         const entry = setup.entryZone?.center || 0;
         const tp1 = setup.targets?.[0] || 0;
-        let expectedMovePct = 0;
+        let expectedMarginPnl = 0;
         if (entry > 0 && tp1 > 0) {
-            expectedMovePct = Math.abs(tp1 - entry) / entry * 100;
+            // Structural TP exists — use it
+            const expectedMovePct = Math.abs(tp1 - entry) / entry * 100;
+            expectedMarginPnl = expectedMovePct * leverage;
         } else {
-            // Fallback: use mode target
-            const modeConfig = this._getModeConfig();
-            expectedMovePct = modeConfig.targetPct[0];
+            // Fallback: use the leverage-risk engine's TP1 NET target + fees
+            // This is the actual margin PnL the system targets for this leverage level
+            const mode = this._state.currentMode || this._getOperatingMode();
+            if (mode === 'micro_scalp') {
+                // TP1 net target = 2% margin at >x50 (capped in leverage-risk.ts)
+                expectedMarginPnl = 2 + feeMarginPct; // gross = net + fees
+            } else if (mode === 'hybrid') {
+                expectedMarginPnl = 3 + feeMarginPct;
+            } else {
+                expectedMarginPnl = (this._config.tp1TargetNetMarginPct || 3) + feeMarginPct;
+            }
         }
 
-        const expectedMarginPnl = expectedMovePct * leverage;
-        const threshold = feeMarginPct * (this._config.profitGateMultiplier || 1.5);
+        // Gate: expected gross must exceed 1.2× total costs
+        const threshold = totalCostMarginPct * 1.2;
 
         if (expectedMarginPnl < threshold) {
-            console.warn(`[ScalpEngine] ⛔ PROFIT GATE: expected ${expectedMarginPnl.toFixed(1)}% margin < ${threshold.toFixed(1)}% (1.5×fees) — REJECTED`);
-            return { pass: false, reason: `Expected ${expectedMarginPnl.toFixed(1)}% < ${threshold.toFixed(1)}% threshold`, feeMarginPct, expectedMarginPnl };
+            console.warn(`[ScalpEngine] ⛔ PROFIT GATE: expected ${expectedMarginPnl.toFixed(1)}% margin < ${threshold.toFixed(1)}% (1.2×costs) — REJECTED`);
+            return { pass: false, reason: `Expected ${expectedMarginPnl.toFixed(1)}% < ${threshold.toFixed(1)}% threshold`, feeMarginPct, slippageMarginPct, expectedMarginPnl };
         }
 
-        return { pass: true, netProfit: expectedMarginPnl - feeMarginPct, feeMarginPct, expectedMarginPnl };
+        return { pass: true, netProfit: expectedMarginPnl - totalCostMarginPct, feeMarginPct, slippageMarginPct, expectedMarginPnl };
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // SLIPPAGE MODEL — conservative estimate
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Estimate slippage as % of notional.
+     * f(volatility, spread, TPS) — uses conservative default if data unavailable.
+     * Returns notional % (divide by leverage for margin %, multiply for margin %).
+     */
+    _estimateSlippage() {
+        const cache = typeof StateCache !== 'undefined' ? StateCache : null;
+        if (!cache) return 0.01; // conservative default: 0.01% notional
+
+        const bestBid = cache.get('bestBid', 0);
+        const bestAsk = cache.get('bestAsk', 0);
+        const price = cache.get('currentPrice', 0);
+        const tps = cache.get('tps', 0);
+        const volScore = this._state.lastVolatilityScore || 0;
+
+        // Base: half the spread (you cross it)
+        let slippage = 0.005; // 0.005% conservative base
+        if (bestBid > 0 && bestAsk > 0 && price > 0) {
+            const spreadPct = (bestAsk - bestBid) / price;
+            slippage = spreadPct / 2;
+        }
+
+        // Volatility premium: high vol = more slippage
+        if (volScore > 60) slippage *= 1.5;
+        else if (volScore > 40) slippage *= 1.2;
+
+        // Low TPS = thin book = more slippage
+        if (tps > 0 && tps < 5) slippage *= 1.3;
+
+        // Floor: never assume zero slippage
+        return Math.max(0.002, slippage);
     },
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -833,16 +888,25 @@ export const ScalpEngine = {
             ? actionable.reduce((best, s) => s.score > best.score ? s : best, actionable[0])
             : null;
 
-        this._state.sessionScalpCount++;
+        // FIX C5: Only increment sessionScalpCount when a real setup is emitted,
+        // NOT on every evaluation cycle (was inflating counter to 1440/day).
+        if (this._state.bestSetup) {
+            this._state.sessionScalpCount++;
+        }
         this._state.candlesSinceEval = 0;
         this._state.lastEventSource = eventType;
 
         const perfEnd = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this._state.lastLatencyMs = Math.round((perfEnd - perfStart) * 100) / 100;
 
-        // v4.0: Record trade emission for velocity + direction stickiness
+        // FIX C6: Do NOT auto-record trade emission here.
+        // Velocity tracking should reflect ACTUAL user trades, not signal generation.
+        // _recordTradeEmission() is now called from the store's markPendingAsActive().
+        // We still track direction for stickiness (no velocity impact).
         if (this._state.bestSetup) {
-            this._recordTradeEmission(this._state.bestSetup.direction);
+            this._state.lastTradeDirection = this._state.bestSetup.direction;
+            this._state.directionStickyUntil = Date.now() + this._config.directionSticky.maxDurationMs;
+            this._state.directionStickyCount = this._config.directionSticky.maxTrades;
         }
 
         return {
@@ -855,15 +919,18 @@ export const ScalpEngine = {
             eventSource: eventType,
             latencyMs: this._state.lastLatencyMs,
             volatilityScore: volScore,
-            // v4.0: Leverage-adaptive metadata
+            // v4.0: Leverage-adaptive metadata — consumed by C1 sync bridge in App.tsx
             operatingMode: this._state.currentMode || this._getOperatingMode(),
             velocityState: {
                 tradesPerMinute: this._state.recentTradeTimestamps.filter(t => Date.now() - t < 60000).length,
                 sizeReduction: this._state.velocityReduction,
             },
-            netPnl: this._performance.netPnl,
+            netPnlSession: this._performance.netPnl,
+            totalFeesSession: this._performance.totalFeesPaid,
             recentWinRate: this._performance.recentWinRate,
             profitGate: this._state.bestSetup?.profitGate || null,
+            // EV check result for UI (new enhancement)
+            evResult: this._computeEV(),
         };
     },
 
@@ -886,11 +953,23 @@ export const ScalpEngine = {
             this._performance.history.shift();
         }
 
-        // ─── Net PnL tracking ───
-        const pnl = result.pnlPct || 0;
-        const feePct = result.feePct || ((this._config.takerFeePct || 0.04) * 2 * (this._state.currentLeverage || 10));
-        this._performance.grossPnl += pnl;
-        this._performance.totalFeesPaid += feePct;
+        // ─── Net PnL tracking (FIX C4: standardize to margin %) ───
+        // All values must be in MARGIN % (= price_move% × leverage).
+        // result.pnlPct should be the NET price move % (after fees from exchange).
+        // If pnlPct is already net-of-fees, we just multiply by leverage.
+        // If pnlPct is gross, we subtract fees.
+        const leverage = this._state.currentLeverage || 10;
+        const pricePnl = result.pnlPct || 0;  // price move % (from exchange, already net of fees)
+        const marginPnl = pricePnl * leverage; // margin PnL %
+        const feeMarginPct = result.feePct
+            ? result.feePct  // if caller provides margin-based fee, use it
+            : (this._config.takerFeePct || 0.04) * 2 * leverage; // otherwise compute
+
+        // If pnlPct is NET (exchange-reported), gross = net + fees
+        // If pnlPct is GROSS, net = gross - fees
+        // We assume exchange-reported = NET (standard for MEXC/Binance APIs)
+        this._performance.grossPnl += marginPnl + feeMarginPct; // reconstruct gross
+        this._performance.totalFeesPaid += feeMarginPct;
         this._performance.netPnl = this._performance.grossPnl - this._performance.totalFeesPaid;
 
         // ─── Rolling win rate (last 20 trades) ───
@@ -990,7 +1069,12 @@ export const ScalpEngine = {
                             EventBus.emit(E.SCALP_SETUP, {
                                 setup: result.bestSetup,
                                 eventSource: result.eventSource,
-                                latencyMs: result.latencyMs
+                                latencyMs: result.latencyMs,
+                                // FIX C1: Include engine state for sync bridge
+                                operatingMode: result.operatingMode,
+                                velocityState: result.velocityState,
+                                netPnlSession: result.netPnlSession,
+                                totalFeesSession: result.totalFeesSession,
                             });
                         }
                     } catch (e) {
@@ -1121,21 +1205,26 @@ export const ScalpEngine = {
                     result.confirmations.push(`vol_penalty_${Math.round(volMult * 100)}pct`);
                 }
 
-                // Apply Intent bonus
-                if (intent.type !== 'unknown' && intent.confidence > 0.4) {
-                    const intentAligned = (result.direction === 'long' && (intent.type === 'breakout' || intent.type === 'sweep')) ||
-                        (result.direction === 'short' && (intent.type === 'breakout' || intent.type === 'sweep'));
-                    if (intentAligned) {
+                // Apply Intent bonus (FIX H1: check DIRECTION alignment, not just type)
+                if (intent.type !== 'unknown' && intent.confidence > 0.4 && intent.direction) {
+                    const intentDirAligned = intent.direction === result.direction;
+                    const intentTypeValid = (intent.type === 'breakout' || intent.type === 'sweep');
+                    if (intentDirAligned && intentTypeValid) {
                         result.score += Math.round(intent.confidence * 15);
-                        result.confirmations.push(`intent_${intent.type}`);
+                        result.confirmations.push(`intent_${intent.type}_${intent.direction}`);
                     }
                 }
 
-                // ═══ NEW: Apply leverage-adaptive modulations ═══
+                // ═══ Apply leverage-adaptive modulations ═══
                 this._microstructureBoost(result, data);
                 this._volumeProfileModulation(result, data);
                 this._amtModulation(result, data);
                 this._applyDirectionStickiness(result, data);
+
+                // ═══ Signal correlation penalty (new) ═══
+                // OBI, CVD, TPS are correlated — if all 3 agree, apply 0.8× to prevent
+                // inflated confidence from counting the same underlying signal 3 times.
+                this._applyCorrelationPenalty(result);
 
                 // Apply range dampener to size
                 if (rangeDampener < 1.0) {
@@ -1347,12 +1436,84 @@ export const ScalpEngine = {
         console.log('[ScalpEngine] Received external ANALYSIS_SIGNAL:', signal);
 
         // Boost existing setups that align with the high-probability analysis
+        // FIX H3: Only boost if signal DIRECTION matches setup direction
         for (const setup of this._state.activeSetups) {
             if (signal.probability > 0.7) {
-                setup.score = Math.min(100, setup.score + 10);
-                setup.confirmations.push('master_analysis_confirmed');
+                const sigDir = signal.direction; // 'long' | 'short' | 'neutral'
+                if (sigDir === setup.direction) {
+                    setup.score = Math.min(100, setup.score + 10);
+                    if (!setup.confirmations.includes('master_analysis_confirmed')) {
+                        setup.confirmations.push('master_analysis_confirmed');
+                    }
+                }
             }
         }
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // SIGNAL CORRELATION PENALTY — prevent inflated confidence
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * If OBI, CVD, and TPS (or absorption) all align in the same direction,
+     * these are correlated order-flow signals. Apply 0.8× penalty to prevent
+     * triple-counting the same underlying flow.
+     */
+    _applyCorrelationPenalty(setup) {
+        const correlated = ['obi_imbalance', 'cvd_acceleration', 'delta_spike',
+            'absorption_key', 'imbalance_confirms_absorption'];
+        const matches = setup.confirmations.filter(c => correlated.includes(c));
+        if (matches.length >= 3) {
+            const original = setup.score;
+            setup.score = Math.round(setup.score * 0.8);
+            setup.confirmations.push(`corr_penalty_${matches.length}signals`);
+            console.debug(`[ScalpEngine] Correlation penalty: ${original} → ${setup.score} (${matches.length} correlated signals)`);
+        }
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // EXPECTED VALUE CHECK — statistical viability
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Compute Expected Value per trade:
+     *   EV = (WR × avgWin) − ((1 − WR) × avgLoss)
+     * Returns { ev, viable, action }.
+     */
+    _computeEV() {
+        const history = this._performance.history;
+        if (history.length < 5) return { ev: 0, viable: true, action: 'insufficient_data' };
+
+        const recent = history.slice(-20);
+        const wins = recent.filter(h => h.isWin);
+        const losses = recent.filter(h => !h.isWin);
+
+        const wr = wins.length / recent.length;
+        const avgWin = wins.length > 0
+            ? wins.reduce((s, h) => s + Math.abs(h.pnlPct || 0), 0) / wins.length
+            : 0;
+        const avgLoss = losses.length > 0
+            ? losses.reduce((s, h) => s + Math.abs(h.pnlPct || 0), 0) / losses.length
+            : 0;
+
+        const ev = (wr * avgWin) - ((1 - wr) * avgLoss);
+
+        let action = 'normal';
+        if (ev <= 0 && recent.length >= 10) {
+            action = 'reduce_frequency'; // EV negative → throttle
+        } else if (ev > avgWin * 0.3) {
+            action = 'edge_confirmed';
+        }
+
+        return { ev: Math.round(ev * 1000) / 1000, viable: ev > 0, action, winRate: wr, avgWin, avgLoss };
+    },
+
+    /**
+     * FIX C6: Public method for external callers (store/UI) to record a real trade.
+     * Called when user marks a setup as "taken" via markPendingAsActive().
+     */
+    recordUserTradeEmission(direction) {
+        this._recordTradeEmission(direction);
     },
 
     // ═══════════════════════════════════════════════════════════════════════
