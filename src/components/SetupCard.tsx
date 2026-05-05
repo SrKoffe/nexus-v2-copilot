@@ -17,7 +17,7 @@ export const SetupCard: React.FC = () => {
     const setup = pendingSetup.adjusted || pendingSetup.natural;
     if (!setup) return null;
 
-    const isLong = setup.direction === 'bullish';
+    const isLong = setup.direction === 'long' || setup.direction === 'bullish';
     const color = isLong ? '#00e1ff' : '#ff3366';
 
     return (

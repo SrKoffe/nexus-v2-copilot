@@ -147,12 +147,14 @@ export const ScalpEngine = {
     },
 
     processLevel2Setup(payload) {
-        const setStatus = useNexusStore.getState().updatePipelineStatus;
+        const setStatus = useNexusStore.getState().setPipelineStage;
         const setPending = useNexusStore.getState().setPendingSetup;
         const leverage = useNexusStore.getState().leverage;
         const balanceUsd = useNexusStore.getState().balanceUsd;
+        
+        const direction = payload.directionBias === 'bullish' ? 'long' : 'short';
 
-        setStatus(3, 'evaluating', payload.directionBias, 'Calculating EV Target...');
+        setStatus(3, 'evaluating', direction, 'Calculating EV Target...');
 
         // 1. Dynamic Target Generation
         const cp = payload.currentPrice;
@@ -193,30 +195,32 @@ export const ScalpEngine = {
         const reqEV = 1.2 * costs; // EV must be 1.2x costs
 
         if (ev < reqEV) {
-            setStatus(3, 'rejected', payload.directionBias, `Negative EV: ${ev.toFixed(2)} < Req: ${reqEV.toFixed(2)}`);
+            setStatus(3, 'rejected', direction, `Negative EV: ${ev.toFixed(2)} < Req: ${reqEV.toFixed(2)}`);
             return;
         }
 
-        setStatus(4, 'evaluating', payload.directionBias, 'Checking Velocity...');
+        setStatus(4, 'evaluating', direction, 'Checking Velocity...');
 
         // 3. Velocity / Anti-Churn (Level 4)
         const tpm = this._state.sessionScalpCount / (Math.max(1, this._state.candlesSinceEval)); // Fake metric
         if (tpm > 5 && leverage > 20) {
-             setStatus(4, 'rejected', payload.directionBias, 'Overtrading blocked');
+             setStatus(4, 'rejected', direction, 'Overtrading blocked');
              return;
         }
 
         const finalSetup = {
-            direction: payload.directionBias,
+            direction: direction,
             symbol: 'BTC-PERP',
             entryPrice: cp,
             stopLoss: slPrice,
             takeProfit1: targetPrice,
             takeProfit1Pct: targetDistancePct * 100,
-            takeProfit1MarginNet: (potentialProfit * 100).toFixed(2),
+            takeProfit1MarginNet: (potentialProfit * 100),
+            takeProfit2: targetPrice,
+            takeProfit2MarginNet: (potentialProfit * 100),
             stopLossPct: slDistancePct * 100,
-            stopLossMarginPct: (potentialLoss * 100).toFixed(2),
-            feesMarginPct: (costs * 100).toFixed(2),
+            stopLossMarginPct: (potentialLoss * 100),
+            feesMarginPct: (costs * 100),
             leverage: leverage,
             breakEvenWinRate: potentialLoss / (potentialProfit + potentialLoss),
             confidence: winProbability,
@@ -228,8 +232,14 @@ export const ScalpEngine = {
             accepted: true
         };
 
-        setStatus(4, 'passed', payload.directionBias, 'SCALP SETUP READY');
-        setPending({ adjusted: finalSetup, natural: finalSetup });
+        setStatus(4, 'passed', direction, 'SCALP SETUP READY');
+        setPending({ 
+            adjusted: finalSetup, 
+            natural: finalSetup,
+            detectedAt: Date.now(),
+            outcome: null,
+            pnlPct: null
+        });
         
         EventBus.emit('SCALP_SETUP', finalSetup);
     },

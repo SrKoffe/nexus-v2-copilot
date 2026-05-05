@@ -33,7 +33,7 @@ export const HUD: React.FC = () => {
         { num: 4, label: 'L4: Execution' }
     ];
 
-    const dirColor = pipelineDirection === 'bullish' ? '#00e1ff' : pipelineDirection === 'bearish' ? '#ff3366' : '#8892b0';
+    const dirColor = (pipelineDirection === 'long' || pipelineDirection === 'bullish') ? '#00e1ff' : (pipelineDirection === 'short' || pipelineDirection === 'bearish') ? '#ff3366' : '#8892b0';
 
     return (
         <div className="hud-pipeline-visualizer">

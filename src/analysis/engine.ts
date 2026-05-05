@@ -150,9 +150,10 @@ export class MasterAnalysisEngine {
 
     processLevel1Signal(payload) {
         // Level 2: Confluence & AMT Spatial Validation
-        const setStatus = useNexusStore.getState().updatePipelineStatus;
+        const setStatus = useNexusStore.getState().setPipelineStage;
         
-        setStatus(2, 'evaluating', payload.directionBias, 'Validating AMT...');
+        const direction = payload.directionBias === 'bullish' ? 'long' : 'short';
+        setStatus(2, 'evaluating', direction, 'Validating AMT...');
 
         // In a real scenario we use VolumeProfile.getSummary(vpResult)
         // Here we mock the VPE levels around the current price for demonstration if VPE is empty
@@ -187,14 +188,14 @@ export class MasterAnalysisEngine {
         }
 
         if (isApproved) {
-            setStatus(2, 'passed', l1Direction, reason);
+            setStatus(2, 'passed', direction, reason);
             EventBus.emit('LEVEL_2_PASSED', {
                 ...payload,
                 amt: vpe,
                 l2Reason: reason
             });
         } else {
-            setStatus(2, 'rejected', l1Direction, 'AMT Spatial Rejection: No Edge');
+            setStatus(2, 'rejected', direction, 'AMT Spatial Rejection: No Edge');
         }
     }
 
