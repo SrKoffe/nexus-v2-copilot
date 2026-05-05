@@ -53,6 +53,23 @@ export async function initAnalysisPipeline() {
         EventBus.emit('MARKET_TICK', tick);
     });
 
+    const unlistenLevel1 = await listen('LEVEL_1_PASSED', (event) => {
+        const payload = event.payload as any;
+        
+        // ─── PIPELINE HUD ───
+        const store = require('../store').useNexusStore;
+        store.getState().setPipelineStage(1, 'passed', payload.directionBias, 'Microstructure Active');
+        
+        EventBus.emit('LEVEL_1_PASSED', payload);
+        
+        // Auto-reset HUD after 2 seconds if pipeline doesn't progress to a full setup
+        setTimeout(() => {
+            if (store.getState().pipelineStage !== 4) {
+                store.getState().setPipelineStage(0, 'idle', null, null);
+            }
+        }, 2000);
+    });
+
     // 3. Listen for Order Events (to unlock sniper/update state)
     const unlistenOrderFilled = await listen('order-filled', (event) => {
         console.log('🎯 [Analysis] Order Filled:', event.payload);
@@ -66,9 +83,9 @@ export async function initAnalysisPipeline() {
 
     console.log('✅ [Analysis] Pipeline Online & Listening to Tauri events.');
 
-    // Return cleanup functions
     return () => {
         unlistenMarketTick();
+        unlistenLevel1();
         unlistenOrderFilled();
         unlistenTradeClosed();
     };

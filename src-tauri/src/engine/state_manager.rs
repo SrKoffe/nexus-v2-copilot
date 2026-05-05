@@ -5,8 +5,6 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::core::event_bus::{SystemEvent, TradeSignal};
-use crate::engine::intent_engine::{IntentEngine, IntentResult};
-use crate::strategy::probability::ProbabilityEngine;
 
 /// Core state for the trading bot
 pub struct StateManager {
@@ -48,6 +46,7 @@ impl StateManager {
     }
 
     /// Evaluates incoming market data against the institutional pipeline.
+    /// LEVEL 1: Microstructure & Liquidity Gatekeeper
     pub async fn analyze(&self, current_price: f64, app_handle: &tauri::AppHandle) -> Option<TradeSignal> {
         // 1. Single-Shot Sniper Lock
         if self.has_open_position.load(Ordering::SeqCst) || self.is_processing.load(Ordering::SeqCst) {
@@ -74,7 +73,7 @@ impl StateManager {
             self.is_processing.store(true, Ordering::SeqCst);
 
             let _ = app_handle.emit("analysis-signal", serde_json::json!({
-                "message": format!("📝 Volatility spike detected (Δ {:.1} pts). Fetching last 25 candles...", price_delta),
+                "message": format!("📝 Level 1 Gatekeeper: Volatility spike detected (Δ {:.1} pts). Assessing microstructure...", price_delta),
                 "level": "sys"
             }));
             
@@ -114,72 +113,31 @@ impl StateManager {
             }
 
             let volatility = if struct_low > 0.0 { (struct_high - struct_low) / struct_low * 100.0 } else { 0.0 };
-            let sweep_direction = if current_price > prev { Some("bullish") } else { Some("bearish") };
+            
+            // Bidirectional Gate: Identify buying or selling aggression
+            let sweep_direction = if current_price > prev { "long" } else { "short" };
             let liquidity_swept = current_price >= struct_high || current_price <= struct_low;
             
-            let intent = IntentEngine::detect(
-                current_price, latest_vol, prev_vol, struct_high, struct_low, vol_delta, volatility, liquidity_swept, sweep_direction
-            );
-            
-            if intent.confidence > 0.4 {
+            // In the Cascading Pipeline, Rust acts ONLY as Level 1 Gatekeeper.
+            // If there's a volatility spike, we pass the raw data to the TS brain (Level 2).
+            if volatility > 0.0 {
+                self.analysis_count.fetch_add(1, Ordering::SeqCst);
+                
+                let payload = serde_json::json!({
+                    "currentPrice": current_price,
+                    "volatility": volatility,
+                    "directionBias": sweep_direction,
+                    "liquiditySwept": liquidity_swept,
+                    "latestVolume": latest_vol,
+                    "volDelta": vol_delta
+                });
+
+                let _ = app_handle.emit("LEVEL_1_PASSED", &payload);
+
                 let _ = app_handle.emit("analysis-signal", serde_json::json!({
-                    "message": format!("Intent Context: {} | Bias: {} | Score: {}%", intent.intent_type.to_uppercase(), intent.direction.to_uppercase(), (intent.confidence * 100.0).round()),
+                    "message": format!("✅ LEVEL 1 PASSED: Microstructure Active. Bias: {}. Routing to TS Brain...", sweep_direction.to_uppercase()),
                     "level": "info"
                 }));
-                
-                // 3. Probability & Confluence Model
-                let prob_engine = ProbabilityEngine::new();
-                let prob = prob_engine.calculate(intent.confidence + 0.15, 0.80);
-                
-                if prob.probability >= 0.65 {
-                    self.analysis_count.fetch_add(1, Ordering::SeqCst);
-                    let count = self.analysis_count.load(Ordering::SeqCst);
-                    
-                    let _ = app_handle.emit("analysis-signal", serde_json::json!({
-                        "message": format!("🎯 CONFLUENCE HIT: {}% Win Probability! Engaging execution router...", (prob.probability * 100.0).round()),
-                        "level": "warn"
-                    }));
-                    
-                    // 4. Trade Execution Gate 
-                    let risk_distance = current_price * 0.005; // 0.5% SL
-                    let (sl, tp) = if intent.direction == "long" {
-                        (current_price - risk_distance, current_price + (risk_distance * 2.0))
-                    } else {
-                        (current_price + risk_distance, current_price - (risk_distance * 2.0))
-                    };
-
-                    let signal = TradeSignal {
-                        id: format!("trade_{}", count),
-                        symbol: "BTC-PERP".to_string(),
-                        direction: intent.direction.clone(),
-                        entry_price: current_price,
-                        quantity: 0.1, // Sized by risk manager
-                        take_profit: Some(tp),
-                        stop_loss: Some(sl),
-                        leverage: Some(self.leverage.load(Ordering::SeqCst)),
-                        reason: format!("{} | {}%", intent.intent_type, (prob.probability * 100.0).round()),
-                        score: prob.probability,
-                        is_bracket: true,
-                    };
-
-                    // Broadcast bracket orders to UI
-                    let _ = app_handle.emit("analysis-signal", serde_json::json!({
-                        "message": format!("ROUTING {}: Entry: ${:.1} | SL: ${:.1} | TP: ${:.1}", intent.direction.to_uppercase(), current_price, sl, tp),
-                        "level": if intent.direction == "long" { "buy" } else { "sell" }
-                    }));
-
-                    // Lock the sniper!
-                    self.has_open_position.store(true, Ordering::SeqCst);
-                    self.is_processing.store(false, Ordering::SeqCst);
-
-                    *self.prev_price.write().unwrap() = current_price;
-                    return Some(signal);
-                } else {
-                     let _ = app_handle.emit("analysis-signal", serde_json::json!({
-                        "message": format!("Aborting setup. Model probability too low: {}%", (prob.probability * 100.0).round()),
-                        "level": "sys"
-                    }));
-                }
             }
         }
         

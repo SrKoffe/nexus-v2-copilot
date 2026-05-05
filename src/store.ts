@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { NaturalSetup, AdjustedSetup, SetupResult } from './analysis/leverage-risk';
+import type { NaturalSetup, SetupResult } from './analysis/leverage-risk';
 import { ScalpEngine } from './analysis/scalp-engine';
 
 /**
@@ -84,6 +84,13 @@ interface NexusState {
     netPnlSession: number;
     totalFeesSession: number;
     setSessionPnl: (net: number, fees: number) => void;
+
+    // ─── 4-Level Pipeline State (HUD Visualizer) ───
+    pipelineStage: 0 | 1 | 2 | 3 | 4;
+    pipelineDirection: 'long' | 'short' | null;
+    pipelineStatus: 'idle' | 'evaluating' | 'passed' | 'rejected';
+    pipelineReason: string | null;
+    setPipelineStage: (stage: 0 | 1 | 2 | 3 | 4, status?: 'idle' | 'evaluating' | 'passed' | 'rejected', direction?: 'long' | 'short' | null, reason?: string | null) => void;
 
     /**
      * FIX C1: Sync bridge — called after each ScalpEngine.handleEvent() return.
@@ -200,6 +207,18 @@ export const useNexusStore = create<NexusState>((set, get) => ({
     netPnlSession: 0,
     totalFeesSession: 0,
     setSessionPnl: (net, fees) => set({ netPnlSession: net, totalFeesSession: fees }),
+
+    // ─── 4-Level Pipeline State (HUD Visualizer) ───
+    pipelineStage: 0,
+    pipelineDirection: null,
+    pipelineStatus: 'idle',
+    pipelineReason: null,
+    setPipelineStage: (stage, status, direction, reason) => set((s) => ({ 
+        pipelineStage: stage, 
+        pipelineStatus: status !== undefined ? status : s.pipelineStatus,
+        pipelineDirection: direction !== undefined ? direction : s.pipelineDirection,
+        pipelineReason: reason !== undefined ? reason : s.pipelineReason
+    })),
 
     // FIX C1: Sync bridge — pushes ScalpEngine state into store
     syncEngineState: (r) => set({

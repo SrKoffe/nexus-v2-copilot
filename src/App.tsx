@@ -3,10 +3,10 @@ import { listen } from '@tauri-apps/api/event';
 import { ChartPanel } from './components/ChartPanel';
 import { SetupCard } from './components/SetupCard';
 import { SetupChecklist } from './components/SetupChecklist';
-import { LiveSignalPanel } from './components/LiveSignalPanel';
 import { MarketContextPanel } from './components/MarketContextPanel';
 import { ScalpingControlPanel } from './components/ScalpingControlPanel';
 import { TradeFeedbackPanel } from './components/TradeFeedbackPanel';
+import { HUD } from './components/HUD';
 import { SetupStrengthMeter, MarketDifficultyIndicator } from './components/Indicators';
 import { LiveFeed } from './components/LiveFeed';
 import { PositionTracker } from './components/PositionTracker';
@@ -234,7 +234,10 @@ function App() {
                 {/* ROW 2: Setup Card + Market Context */}
                 <section className="grid-setup panel">
                     <div className="panel-header">Setup (lev {leverage}x)</div>
-                    <div className="panel-content"><SetupCard /></div>
+                    <div className="panel-content" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <HUD />
+                        <SetupCard />
+                    </div>
                 </section>
 
                 <section className="grid-context panel">
@@ -249,8 +252,7 @@ function App() {
                         <span className="text-xs text-secondary">real-time</span>
                     </div>
                     <div className="panel-content" style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflow: 'auto' }}>
-                        <LiveSignalPanel />
-                        <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
+                        <div style={{ paddingBottom: '6px' }}>
                             <div style={{ fontSize: '10px', fontWeight: 600, color: '#8892b0', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                                 Intelligence Feed
                             </div>

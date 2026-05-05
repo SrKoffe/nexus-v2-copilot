@@ -1056,33 +1056,111 @@ export const ScalpEngine = {
         if (typeof EventBus === 'undefined') return;
         const E = EventBus.EVENTS;
         const self = this;
-        const targetEvents = [
-            E.CANDLE_CLOSE, E.LIQUIDITY_SWEEP, E.OB_RETEST, E.HVN_REJECTION,
-            E.MICRO_BOS, E.FVG_FILL, E.DELTA_SPIKE, E.ABSORPTION, E.ANALYSIS_SIGNAL
-        ];
-        for (const evt of targetEvents) {
-            if (evt) {
-                EventBus.on(evt, async function (event) {
-                    try {
-                        const result = await self.handleEvent(event);
-                        if (result && result.active) {
-                            EventBus.emit(E.SCALP_SETUP, {
-                                setup: result.bestSetup,
-                                eventSource: result.eventSource,
-                                latencyMs: result.latencyMs,
-                                // FIX C1: Include engine state for sync bridge
-                                operatingMode: result.operatingMode,
-                                velocityState: result.velocityState,
-                                netPnlSession: result.netPnlSession,
-                                totalFeesSession: result.totalFeesSession,
-                            });
-                        }
-                    } catch (e) {
-                        console.warn('[ScalpEngine] Event handler error:', e);
-                    }
-                });
+        
+        // Listen to Level 2 (Bidirectional Confluence)
+        EventBus.on('LEVEL_2_PASSED', async function (setup) {
+            try {
+                const result = await self.processLevel2Setup(setup);
+                if (result && result.active) {
+                    EventBus.emit(E.SCALP_SETUP, {
+                        setup: result.bestSetup,
+                        eventSource: 'LEVEL_2_PASSED',
+                        latencyMs: 0,
+                        // Include engine state for sync bridge
+                        operatingMode: result.operatingMode,
+                        velocityState: result.velocityState,
+                        netPnlSession: result.netPnlSession,
+                        totalFeesSession: result.totalFeesSession,
+                    });
+                }
+            } catch (e) {
+                console.warn('[ScalpEngine] Level 2 processing error:', e);
             }
+        });
+
+        // Still listen to ANALYSIS_SIGNAL to keep mode/velocity in sync for UI even without setups
+        EventBus.on(E.ANALYSIS_SIGNAL, () => {
+             // Just keeping state updated, no setup processing
+        });
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // LEVEL 3 & 4 CASCADING PIPELINE
+    // ═══════════════════════════════════════════════════════════════════════
+
+    async processLevel2Setup(setup) {
+        console.log(`[LEVEL 3] Evaluating setup ${setup.direction.toUpperCase()} from Level 2...`);
+        const mode = this._state.currentMode || this._getOperatingMode();
+        this._state.currentMode = mode;
+
+        // ─── PIPELINE HUD ───
+        let store;
+        if (typeof window !== 'undefined') {
+            try {
+                store = require('../store').useNexusStore;
+                store.getState().setPipelineStage(3, 'evaluating', setup.direction, `Level 3 (${mode})`);
+            } catch (e) {}
         }
+
+        // Level 3: Dynamic Leverage Sensitivity
+        const modeConfig = this._getModeConfig();
+        const executionThreshold = modeConfig.minConfidence; // From config (micro_scalp is looser)
+        
+        if (setup.confidence < executionThreshold) {
+            console.log(`[LEVEL 3] Rejected: Confidence ${(setup.confidence * 100).toFixed(0)}% < ${Math.round(executionThreshold * 100)}% required for ${mode} leverage tier.`);
+            if (store) store.getState().setPipelineStage(3, 'rejected', setup.direction, `Low Confidence for ${mode}`);
+            return this._emptyResult(`Low confidence for ${mode} tier`);
+        }
+
+        // Level 3: Profit Gate (EV > 1.2 * fees)
+        const fakeData = this._buildDataFromCache({ currentPrice: setup.entryPrice });
+        const entryZone = this._computeEntryZone(setup.direction, fakeData);
+        const tradeMgmt = this._computeTradeManagement(setup.direction, entryZone, fakeData);
+        
+        setup.stopLoss = tradeMgmt.stopLoss;
+        setup.targets = tradeMgmt.targets;
+        
+        const gate = this._profitGate(setup, fakeData);
+        if (gate.blocked) {
+            console.log(`[LEVEL 3] Rejected: Profit Gate Failed - ${gate.reason}`);
+            if (store) store.getState().setPipelineStage(3, 'rejected', setup.direction, `Profit Gate Failed: ${gate.reason}`);
+            return this._emptyResult(`Profit Gate: ${gate.reason}`);
+        }
+
+        if (store) store.getState().setPipelineStage(3, 'passed', setup.direction, `Profit Gate Passed`);
+
+        // Level 4: Velocity Control (Anti-Churn)
+        if (store) store.getState().setPipelineStage(4, 'evaluating', setup.direction, `Level 4 (Velocity Check)`);
+        
+        const vel = this._velocityControl(setup);
+        if (vel.blocked) {
+            console.log(`[LEVEL 4] Rejected: Velocity Control - ${vel.reason}`);
+            if (store) store.getState().setPipelineStage(4, 'rejected', setup.direction, `Anti-Churn: ${vel.reason}`);
+            return this._emptyResult(`Velocity: ${vel.reason}`);
+        }
+
+        // Passed L3 and L4!
+        console.log(`✅ [LEVEL 4] PASSED. Finalizing SCALP_SETUP...`);
+        if (store) store.getState().setPipelineStage(4, 'passed', setup.direction, `Setup Confirmed`);
+        
+        setup.score = setup.confidence * 100;
+        setup.type = 'cascading_confluence';
+        setup.quality = setup.score > 80 ? 'premium' : 'standard';
+        
+        this._state.bestSetup = setup;
+        
+        // Return structured state for UI / Sync Bridge
+        return {
+            active: true,
+            bestSetup: setup,
+            operatingMode: this._state.currentMode,
+            velocityState: {
+                tradesPerMinute: this._state.recentTradeTimestamps?.filter(t => Date.now() - t < 60000).length || 0,
+                sizeReduction: this._state.velocityReduction ?? 1.0,
+            },
+            netPnlSession: this._performance.netPnl ?? 0,
+            totalFeesSession: this._performance.totalFeesPaid ?? 0
+        };
     },
 
     // ═══════════════════════════════════════════════════════════════════════

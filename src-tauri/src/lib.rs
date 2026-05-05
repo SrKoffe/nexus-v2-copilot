@@ -303,6 +303,8 @@ pub fn run() {
                     match rx.recv().await {
                         Ok(core::event_bus::SystemEvent::MarketTick(tick)) => {
                             sm.update_price(tick.price);
+                            // Level 1 Gatekeeper: Evaluate tick for microstructure activity
+                            let _ = sm.analyze(tick.price, &handle).await;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                             log::warn!("[StateUpdater] Skipped {} events", n);

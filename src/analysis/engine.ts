@@ -20,36 +20,30 @@ export class MasterAnalysisEngine {
     init() {
         if (this.isInitialized) return;
 
-        console.log('[MAESTRO v2] Initializing Institutional Pipeline...');
+        console.log('[MAESTRO v2] Initializing Institutional Pipeline (Cascading L2)...');
 
-        // v3.0: Optimized trigger system (Price Movement based)
-        EventBus.on('TICK_UPDATE', (data) => {
-            this.analyze(data);
-        });
-
-        EventBus.on('CANDLE_CLOSE', (data) => {
-            this.analyze(data, true); // Force on candle close
+        // Level 2: Listen for Level 1 Gatekeeper approval
+        EventBus.on('LEVEL_1_PASSED', (l1Data) => {
+            this.analyze(l1Data);
         });
 
         this.isInitialized = true;
     }
 
-    async analyze(marketData, force = false) {
-        if (!marketData || !marketData.candles1m) return null;
+    async analyze(l1Data) {
+        // Level 2 expects L1 data + access to candleManager
+        const { candles1m } = require('./candle-manager').candleManager;
+        if (!candles1m || candles1m.length === 0) return null;
 
-        const candles = marketData.candles1m;
-        const currentPrice = marketData.price || 
-                           (candles.length > 0 ? candles[candles.length - 1].close : 0);
+        const candles = candles1m;
+        const currentPrice = l1Data.currentPrice;
 
-        // --- CPU OPTIMIZATION GATING ---
-        if (!force && this.lastAnalysisPrice > 0) {
-            const move = Math.abs(currentPrice - this.lastAnalysisPrice) / this.lastAnalysisPrice;
-            if (move < 0.0005) return null; // 0.05% change threshold
-        }
         this.lastAnalysisPrice = currentPrice;
 
-        try {
+        const store = require('../store').useNexusStore;
+        store.getState().setPipelineStage(2, 'evaluating', l1Data.directionBias, 'Evaluating Confluence...');
 
+        try {
             // 1. Run Engines
             const mse = MarketStateEngine.analyze(candles);
             const ill = LiquidityEngine.analyze(candles);
@@ -65,7 +59,7 @@ export class MasterAnalysisEngine {
                 vwap: Indicators.VWAP(candles)
             };
 
-            // 3. Confluence Scoring
+            // 3. Confluence Scoring (Bidirectional)
             const confluenceResult = ConfluenceEngine.calculate(
                 indicators, 
                 {}, // patterns
@@ -73,59 +67,89 @@ export class MasterAnalysisEngine {
                 { marketState: mse, liquidity: ill, volumeProfile: vpe }
             );
 
-            const probability = confluenceResult.confidence / 100;
-            const direction = this._resolveDirection(mse, ill, confluenceResult);
+            // Level 2 Bidirectional Validation
+            // We evaluate both LONG and SHORT setups.
+            let direction = this._resolveDirection(mse, ill, confluenceResult);
+            
+            // Bias from L1 microstructure
+            const l1Bias = l1Data.directionBias;
+            if (direction.bias !== 'neutral' && direction.bias !== l1Bias) {
+                console.log(`[LEVEL 2] Confluence direction (${direction.bias}) conflicts with L1 microstructure bias (${l1Bias}). Discarding.`);
+                store.getState().setPipelineStage(2, 'rejected', l1Bias, `Direction conflict (L1=${l1Bias}, L2=${direction.bias})`);
+                return null; // Conflict between L1 microstructure and L2 macro
+            }
+            
+            let confidence = confluenceResult.confidence;
+            
+            // Correlation Penalty: if multiple order-flow signals align too perfectly, 
+            // penalize slightly to prevent artificial confidence inflation.
+            // L1 Volatility + L1 Swept + High MACD + RSI
+            let correlatedSignals = 0;
+            if (l1Data.liquiditySwept) correlatedSignals++;
+            if (l1Data.volatility > 0.05) correlatedSignals++;
+            if (indicators.rsi && (indicators.rsi > 70 || indicators.rsi < 30)) correlatedSignals++;
+            
+            if (correlatedSignals >= 3) {
+                console.log(`[LEVEL 2] Applying correlation penalty (0.8x) due to ${correlatedSignals} stacked signals.`);
+                confidence *= 0.8;
+            }
 
-            // 4. Build Signal
+            const probability = confidence / 100;
+
+            // Baseline Level 2 threshold (Level 3 will refine this dynamically based on leverage)
+            const baseL2Threshold = 0.50; 
+            
+            if (probability < baseL2Threshold || direction.bias === 'neutral') {
+                store.getState().setPipelineStage(2, 'rejected', l1Bias, `Low Confluence (${Math.round(probability * 100)}%)`);
+                return null;
+            }
+
+            store.getState().setPipelineStage(2, 'passed', direction.bias, `High Confluence (${Math.round(probability * 100)}%)`);
+
+            // 4. Build Signal (Level 2 Passed)
             const finalSignal = {
                 timestamp: Date.now(),
                 direction: direction.bias,
-                probability: confluenceResult.confidence / 100,
+                probability: probability,
                 score: confluenceResult.score,
                 source: direction.source,
                 classification: confluenceResult.classification?.label || 'Neutral',
                 breakdown: confluenceResult.breakdown,
+                l1Data: l1Data, // Pass L1 data down the pipeline
                 mse: { 
                     regime: mse.regime?.current, 
                     strength: mse.regime?.confidence 
-                },
-                ill: { 
-                    sweeps: ill.sweeps?.length || 0,
-                    confirmed: ill.sweeps?.filter(s => s.confirmed).length || 0
                 }
             };
 
-            console.log(`🎯 [Analysis] Signal: ${finalSignal.direction.toUpperCase()} (${(finalSignal.probability * 100).toFixed(0)}%) | Source: ${finalSignal.source}`);
-            if (confluenceResult.score !== 0) {
-                console.log(`📊 [Confluence] Score: ${confluenceResult.score} | Confidence: ${confluenceResult.confidence}%`);
-            }
+            console.log(`🎯 [LEVEL 2] Directional Confluence: ${finalSignal.direction.toUpperCase()} (${(finalSignal.probability * 100).toFixed(0)}%)`);
 
-            EventBus.emit('ANALYSIS_SIGNAL', finalSignal);
-
-            // 5. Execution Gate: Leverage-Adaptive Thresholds (v4.0)
-            const regime = mse.regime?.current || 'range';
-            const volScore = ScalpEngine._state?.lastVolatilityScore || 50;
-            const operatingMode = ScalpEngine._state?.currentMode || 'swing_scalp';
+            // EventBus.emit('ANALYSIS_SIGNAL', finalSignal); // Keep for UI logs if needed
             
-            // Mode-aware threshold: micro_scalp is more aggressive
-            let executionThreshold = 0.65; // swing_scalp default
-            if (operatingMode === 'micro_scalp') executionThreshold = 0.50;
-            else if (operatingMode === 'hybrid') executionThreshold = 0.55;
-
-            // Market condition modifiers (still apply on top)
-            if (volScore > 70) executionThreshold += 0.10; // Pre-news / High noise filter
-            if (regime === 'range' && operatingMode === 'swing_scalp') executionThreshold -= 0.10;
-
-            // Co-pilot: when threshold reached, EMIT setup (no execution).
-            // Frontend SetupCard renders it; user decides whether to trade on MEXC.
-            if (probability >= executionThreshold && direction.bias !== 'neutral' && !this.isProcessing) {
-                console.log(`📡 [SETUP] Threshold reached (${(probability*100).toFixed(0)}% >= ${(executionThreshold*100).toFixed(0)}%) mode=${operatingMode} — emitting recommendation`);
-                this._emitSetup(direction.bias, probability, currentPrice);
+            if (!this.isProcessing) {
+                console.log(`✅ [LEVEL 2] PASSED. Emitting to Level 3 (Profit Gate & Dynamic Leverage)...`);
+                
+                // Emitting to Level 3
+                this.isProcessing = true;
+                const naturalSetup = {
+                    id: `setup_${Date.now()}`,
+                    symbol: 'BTC_USDT',
+                    direction: direction.bias,
+                    entryPrice: currentPrice,
+                    confidence: probability,
+                    reason: 'Level 2 Bidirectional Confluence',
+                    timestamp: Date.now(),
+                    l1Data: l1Data
+                };
+                
+                EventBus.emit('LEVEL_2_PASSED', naturalSetup);
+                
+                setTimeout(() => { this.isProcessing = false; }, 100);
             }
 
             return finalSignal;
         } catch (error) {
-            console.error('[MAESTRO] Analysis error:', error);
+            console.error('[MAESTRO] L2 Analysis error:', error);
             return null;
         }
     }
@@ -154,47 +178,7 @@ export class MasterAnalysisEngine {
         return { bias: 'neutral', source: 'Neutral' };
     }
 
-    /**
-     * Emit a structured setup recommendation to the frontend.
-     *
-     * Co-pilot mode: NEVER calls invoke('execute_auto_order'). The system only
-     * surfaces high-confluence setups to Roberto, who decides and executes
-     * manually on MEXC. The setup payload is consumed by <SetupCard /> and
-     * (later) the LeverageAdjustedRiskEngine which recomputes SL/TP per leverage.
-     */
-    _emitSetup(direction, score, price) {
-        this.isProcessing = true;
-        try {
-            const setup = ScalpEngine.calculateSetup(direction);
 
-            const naturalSetup = {
-                id: `setup_${Date.now()}`,
-                symbol: 'BTC_USDT',     // MEXC contract format
-                direction: direction,
-                entryPrice: price,
-                naturalStopLoss: setup.stopLoss,
-                naturalTakeProfit: setup.takeProfit,
-                confidence: score,
-                reason: 'Institutional Confluence',
-                timestamp: Date.now(),
-            };
-
-            console.log('[MAESTRO] 📡 Setup detected:', naturalSetup);
-            // Co-pilot: emit to frontend so SetupCard renders + LeverageAdjustedRiskEngine
-            // can recompute SL/TP based on user-selected leverage.
-            EventBus.emit('SETUP_DETECTED', naturalSetup);
-        } catch (error) {
-            console.error('[MAESTRO] Setup emit error:', error);
-        } finally {
-            this.isProcessing = false;
-        }
-    }
-
-    /** @deprecated Co-pilot does not auto-execute. Kept as no-op for any stale callers. */
-    async _executeTrade(direction, score, price) {
-        console.warn('[MAESTRO] _executeTrade is deprecated in co-pilot mode. Routing to _emitSetup.');
-        this._emitSetup(direction, score, price);
-    }
 }
 
 export const maestro = new MasterAnalysisEngine();

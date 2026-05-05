@@ -92,22 +92,21 @@ const AcceptedView: React.FC<{ setup: AdjustedSetup; onTake: () => void }> = ({ 
 
             {/* Entry / SL / TP — scalper model: TP em margin-PnL net */}
             <div style={{
-                background: 'rgba(0,0,0,0.25)',
-                border: '1px solid rgba(255,255,255,0.06)',
-                borderRadius: '6px',
-                padding: '10px 12px',
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid rgba(255,255,255,0.05)',
+                borderRadius: '8px',
+                padding: '12px',
                 fontFamily: 'JetBrains Mono, monospace',
                 fontSize: '12px',
+                backdropFilter: 'blur(10px)',
+                boxShadow: 'inset 0 0 15px rgba(255,255,255,0.01)'
             }}>
                 <Row label="Entry" value={`$${setup.entryPrice.toFixed(1)}`} color="#fff" />
                 <Row label="SL"
                      value={`$${setup.stopLoss.toFixed(1)}  (-${setup.stopLossPct.toFixed(2)}% / −${setup.stopLossMarginPct.toFixed(0)}% margem)`}
                      color="#ff4444" />
-                <Row label={`TP1 (50%, +${setup.takeProfit1MarginNet}% net)`}
+                <Row label={`Target (+${setup.takeProfit1MarginNet}% net)`}
                      value={`$${setup.takeProfit1.toFixed(1)}  (+${setup.takeProfit1Pct.toFixed(3)}%)`}
-                     color="#00ff88" />
-                <Row label={`TP2 (50%, +${setup.takeProfit2MarginNet}% net)`}
-                     value={`$${setup.takeProfit2.toFixed(1)}  (+${setup.takeProfit2Pct.toFixed(3)}%)`}
                      color="#00ff88" />
                 <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)', margin: '8px 0' }} />
                 <Row label="Fees (round-trip)"

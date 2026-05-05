@@ -1,0 +1,86 @@
+.hud-pipeline-visualizer {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(10, 15, 25, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    backdrop-filter: blur(10px);
+}
+
+.hud-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 8px;
+}
+
+.led-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+}
+
+.led-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    position: relative;
+}
+
+/* Connecting line */
+.led-step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    left: 60%;
+    width: 80%;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.05);
+    z-index: 0;
+}
+
+.led-bulb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    z-index: 1;
+    transition: all 0.2s ease-in-out;
+}
+
+.led-evaluating {
+    animation: blink-yellow 0.5s infinite alternate;
+}
+
+.led-rejected {
+    box-shadow: 0 0 12px rgba(255, 51, 102, 0.8) !important;
+}
+
+.led-passed {
+    box-shadow: 0 0 12px rgba(0, 225, 255, 0.8) !important;
+}
+
+@keyframes blink-yellow {
+    from {
+        opacity: 1;
+        box-shadow: 0 0 15px rgba(255, 184, 0, 0.8);
+    }
+    to {
+        opacity: 0.4;
+        box-shadow: 0 0 5px rgba(255, 184, 0, 0.2);
+    }
+}
+
+.hud-status-text {
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    text-align: center;
+    min-height: 20px;
+}

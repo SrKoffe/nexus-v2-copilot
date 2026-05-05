@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useNexusStore } from '../store';
-import { EventBus } from '../analysis/event-bus';
-
 /**
  * ═══════════════════════════════════════════════════════════════════════
  * SCALPING CONTROL PANEL — System constraints + velocity state.
@@ -16,7 +14,7 @@ export const ScalpingControlPanel: React.FC = () => {
     const mode = useNexusStore(s => s.operatingMode);
     const velocity = useNexusStore(s => s.velocityState);
     const takerFee = useNexusStore(s => s.takerFeePct);
-    const [tick, setTick] = useState(0);
+    const [, setTick] = useState(0);
 
     // Re-render periodically for velocity updates
     useEffect(() => {
