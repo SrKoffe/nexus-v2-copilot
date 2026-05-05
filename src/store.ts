@@ -74,6 +74,15 @@ interface NexusState {
     /** MEXC taker fee % (do nominal). Default 0.04 */
     takerFeePct: number;
     setRiskConfig: (cfg: { tp1NetTarget?: number; tp2NetTarget?: number; takerFeePct?: number }) => void;
+
+    // ─── Leverage-adaptive engine state (v4.0) ───
+    operatingMode: 'swing_scalp' | 'hybrid' | 'micro_scalp';
+    setOperatingMode: (mode: 'swing_scalp' | 'hybrid' | 'micro_scalp') => void;
+    velocityState: { tradesPerMinute: number; sizeReduction: number };
+    setVelocityState: (v: { tradesPerMinute: number; sizeReduction: number }) => void;
+    netPnlSession: number;
+    totalFeesSession: number;
+    setSessionPnl: (net: number, fees: number) => void;
 }
 
 /**
@@ -163,4 +172,13 @@ export const useNexusStore = create<NexusState>((set, get) => ({
             tp2NetTarget: cfg.tp2NetTarget ?? s.tp2NetTarget,
             takerFeePct: cfg.takerFeePct ?? s.takerFeePct,
         })),
+
+    // ─── Leverage-adaptive engine state (v4.0) ───
+    operatingMode: 'swing_scalp' as const,
+    setOperatingMode: (mode) => set({ operatingMode: mode }),
+    velocityState: { tradesPerMinute: 0, sizeReduction: 1.0 },
+    setVelocityState: (v) => set({ velocityState: v }),
+    netPnlSession: 0,
+    totalFeesSession: 0,
+    setSessionPnl: (net, fees) => set({ netPnlSession: net, totalFeesSession: fees }),
 }));

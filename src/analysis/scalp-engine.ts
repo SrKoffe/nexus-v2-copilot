@@ -11,17 +11,39 @@ export const ScalpEngine = {
     // ═══════════════════════════════════════════════════════════════════════
 
     _config: {
-        minSetupScore: 65,            // era 50
+        minSetupScore: 65,
         highQualityThreshold: 75,
         premiumThreshold: 85,
 
+        // ─── Leverage Behavior Model (3 operating modes) ───
+        leverageModel: {
+            modes: {
+                swing_scalp:  { maxLeverage: 10,  minConfidence: 0.70, targetPct: [0.5, 1.0],   maxHoldCandles: 20, scannerGateMult: 0.8 },
+                hybrid:       { maxLeverage: 50,  minConfidence: 0.60, targetPct: [0.15, 0.50],  maxHoldCandles: 10, scannerGateMult: 0.65 },
+                micro_scalp:  { maxLeverage: 999, minConfidence: 0.50, targetPct: [0.05, 0.15],  maxHoldCandles: 3,  scannerGateMult: 0.5 },
+            },
+            signalSensitivity: {
+                low:    { partialSignals: false, microSpikes: false, persistenceReq: 3 },
+                medium: { partialSignals: true,  microSpikes: false, persistenceReq: 2 },
+                high:   { partialSignals: true,  microSpikes: true,  persistenceReq: 1 },
+            }
+        },
+
+        // ─── ATR profiles per mode ───
+        atrProfiles: {
+            swing_scalp:  { stopMultiple: 0.5, tp1Multiple: 1.5, tp2Multiple: 2.5, tp3Multiple: 3.5, trailActivation: 1.0, trailDistance: 0.3 },
+            hybrid:       { stopMultiple: 0.35, tp1Multiple: 1.0, tp2Multiple: 1.8, tp3Multiple: 2.5, trailActivation: 0.7, trailDistance: 0.25 },
+            micro_scalp:  { stopMultiple: 0.2, tp1Multiple: 0.4, tp2Multiple: 0.8, tp3Multiple: 1.2, trailActivation: 0.3, trailDistance: 0.15 },
+        },
+
+        // ─── Default ATR (swing_scalp baseline) ───
         atr: {
-            stopMultiple: 0.5,        // era 0.7
-            tp1Multiple: 1.5,         // era 1.0 (RR: 1:3)
+            stopMultiple: 0.5,
+            tp1Multiple: 1.5,
             tp2Multiple: 2.5,
-            tp3Multiple: 3.5,         // era 2.5
+            tp3Multiple: 3.5,
             trailActivation: 1.0,
-            trailDistance: 0.3        // era 0.5
+            trailDistance: 0.3
         },
 
         scaleOut: {
@@ -38,8 +60,26 @@ export const ScalpEngine = {
             sizeReduction: [1.0, 0.5, 0.25, 0.0]
         },
 
-        setupTTL: 3,                  // era 5
-        confirmationWindow: 3,         // era 8
+        // ─── Velocity control (anti-churn) ───
+        velocity: {
+            swing_scalp:  { maxTradesPerMin: 1 },
+            hybrid:       { maxTradesPerMin: 2 },
+            micro_scalp:  { maxTradesPerMin: 5 },  // dynamic: 3-8 based on leverage
+        },
+
+        // ─── Direction stickiness ───
+        directionSticky: {
+            maxTrades: 3,       // stay sticky for N trades
+            maxDurationMs: 30000, // or 30 seconds
+            flipPenalty: 0.6,   // score multiplier for direction flip without reversal
+        },
+
+        // ─── Profitability gate ───
+        takerFeePct: 0.04,      // MEXC default taker fee per side
+        profitGateMultiplier: 1.5, // expected move must exceed this × fees
+
+        setupTTL: 3,
+        confirmationWindow: 3,
         offHoursPenalty: 0.9,
         killZoneBoost: 1.15,
         spreadHardBlockPct: 0.02,
@@ -86,7 +126,21 @@ export const ScalpEngine = {
         lastLatencyMs: 0,
         lastVolatilityScore: 0,
         currentLeverage: 10,
-        isLiveSimActive: false
+        isLiveSimActive: false,
+        // ─── Velocity control (anti-churn) ───
+        recentTradeTimestamps: [],
+        velocityReduction: 1.0,
+        // ─── Direction stickiness ───
+        lastTradeDirection: null,
+        directionStickyUntil: 0,
+        directionStickyCount: 0,
+        // ─── Operating mode ───
+        currentMode: 'swing_scalp',
+        // ─── Win rate throttle ───
+        winRateThrottleActive: false,
+        winRateThrottleFactor: 1.0,
+        // ─── Auto-downgrade ───
+        modeDowngradedUntil: 0,
     },
 
 
@@ -107,21 +161,30 @@ export const ScalpEngine = {
 
     _performance: {
         history: [],
-        // v3.0: Only 5 institutional setup types tracked
+        // v4.0: Institutional + micro-scalp setup types
         byType: {
             liquidity_sweep_reversal: { wins: 0, losses: 0, totalRR: 0, count: 0 },
             order_block_retest: { wins: 0, losses: 0, totalRR: 0, count: 0 },
             volume_node_rejection: { wins: 0, losses: 0, totalRR: 0, count: 0 },
             micro_bos_continuation: { wins: 0, losses: 0, totalRR: 0, count: 0 },
-            fvg_fill_rejection: { wins: 0, losses: 0, totalRR: 0, count: 0 }
+            fvg_fill_rejection: { wins: 0, losses: 0, totalRR: 0, count: 0 },
+            micro_spike: { wins: 0, losses: 0, totalRR: 0, count: 0 },
+            absorption_reversal: { wins: 0, losses: 0, totalRR: 0, count: 0 }
         },
         typeMultipliers: {
             liquidity_sweep_reversal: 1.0,
             order_block_retest: 1.0,
             volume_node_rejection: 1.0,
             micro_bos_continuation: 1.0,
-            fvg_fill_rejection: 1.0
-        }
+            fvg_fill_rejection: 1.0,
+            micro_spike: 1.0,
+            absorption_reversal: 1.0
+        },
+        // ─── Net profitability tracking ───
+        netPnl: 0,
+        grossPnl: 0,
+        totalFeesPaid: 0,
+        recentWinRate: 0.5,
     },
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -131,10 +194,465 @@ export const ScalpEngine = {
     setLeverage(val) {
         if (!val || isNaN(val)) return;
         this._state.currentLeverage = Math.max(1, parseInt(val, 10));
+        this._state.currentMode = this._getOperatingMode();
         if (typeof StateCache !== 'undefined') {
             StateCache.set('currentLeverage', this._state.currentLeverage);
+            StateCache.set('operatingMode', this._state.currentMode);
         }
-        console.log(`[ScalpEngine] Leverage set to ${this._state.currentLeverage}x.`);
+        console.log(`[ScalpEngine] Leverage set to ${this._state.currentLeverage}x → mode: ${this._state.currentMode}`);
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // LEVERAGE BEHAVIOR MODEL — CORE
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Resolve operating mode from current leverage.
+     * swing_scalp (x1-x10) | hybrid (x10-x50) | micro_scalp (x50-x500)
+     */
+    _getOperatingMode() {
+        const lev = this._state.currentLeverage || 10;
+        // Check auto-downgrade
+        if (this._state.modeDowngradedUntil > Date.now()) {
+            return 'hybrid'; // forced downgrade from micro_scalp
+        }
+        const modes = this._config.leverageModel.modes;
+        if (lev <= modes.swing_scalp.maxLeverage) return 'swing_scalp';
+        if (lev <= modes.hybrid.maxLeverage) return 'hybrid';
+        return 'micro_scalp';
+    },
+
+    /** Get signal sensitivity profile for current mode */
+    _getSignalSensitivity() {
+        const mode = this._state.currentMode || this._getOperatingMode();
+        if (mode === 'micro_scalp') return this._config.leverageModel.signalSensitivity.high;
+        if (mode === 'hybrid') return this._config.leverageModel.signalSensitivity.medium;
+        return this._config.leverageModel.signalSensitivity.low;
+    },
+
+    /** Get ATR profile for current operating mode */
+    _getActiveATRProfile() {
+        const mode = this._state.currentMode || this._getOperatingMode();
+        return this._config.atrProfiles[mode] || this._config.atrProfiles.swing_scalp;
+    },
+
+    /** Get mode config (minConfidence, targetPct, etc) */
+    _getModeConfig() {
+        const mode = this._state.currentMode || this._getOperatingMode();
+        return this._config.leverageModel.modes[mode] || this._config.leverageModel.modes.swing_scalp;
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PROFIT GATE — MANDATORY (expected move > 1.5× fees)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Hard gate: reject setups where expected profit doesn't cover fees.
+     * At x100, round-trip fees = 0.04% × 2 × 100 = 8% of margin.
+     * Expected margin PnL must exceed profitGateMultiplier × fees.
+     */
+    _profitGate(setup) {
+        const leverage = this._state.currentLeverage || 10;
+        const feePct = (this._config.takerFeePct || 0.04) * 2; // round-trip % of notional
+        const feeMarginPct = feePct * leverage; // fees as % of margin
+
+        // Estimate expected price move from TP1
+        const entry = setup.entryZone?.center || 0;
+        const tp1 = setup.targets?.[0] || 0;
+        let expectedMovePct = 0;
+        if (entry > 0 && tp1 > 0) {
+            expectedMovePct = Math.abs(tp1 - entry) / entry * 100;
+        } else {
+            // Fallback: use mode target
+            const modeConfig = this._getModeConfig();
+            expectedMovePct = modeConfig.targetPct[0];
+        }
+
+        const expectedMarginPnl = expectedMovePct * leverage;
+        const threshold = feeMarginPct * (this._config.profitGateMultiplier || 1.5);
+
+        if (expectedMarginPnl < threshold) {
+            console.warn(`[ScalpEngine] ⛔ PROFIT GATE: expected ${expectedMarginPnl.toFixed(1)}% margin < ${threshold.toFixed(1)}% (1.5×fees) — REJECTED`);
+            return { pass: false, reason: `Expected ${expectedMarginPnl.toFixed(1)}% < ${threshold.toFixed(1)}% threshold`, feeMarginPct, expectedMarginPnl };
+        }
+
+        return { pass: true, netProfit: expectedMarginPnl - feeMarginPct, feeMarginPct, expectedMarginPnl };
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // VELOCITY CONTROL — ANTI-CHURN
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Instead of blocking trades, reduce position size when over threshold.
+     * Returns size multiplier (1.0 = full, 0.25 = min, 0 = blocked).
+     */
+    _velocityControl() {
+        const now = Date.now();
+        const mode = this._state.currentMode || this._getOperatingMode();
+        const velocityCfg = this._config.velocity[mode] || { maxTradesPerMin: 2 };
+
+        // Dynamic max for micro_scalp based on leverage
+        let maxPerMin = velocityCfg.maxTradesPerMin;
+        if (mode === 'micro_scalp') {
+            const lev = this._state.currentLeverage || 50;
+            if (lev >= 200) maxPerMin = 8;
+            else if (lev >= 100) maxPerMin = 6;
+            else maxPerMin = 3;
+        }
+
+        // Clean old timestamps (keep last 60s)
+        this._state.recentTradeTimestamps = this._state.recentTradeTimestamps.filter(t => now - t < 60000);
+        const tradesLast60s = this._state.recentTradeTimestamps.length;
+
+        if (tradesLast60s >= maxPerMin * 3) {
+            this._state.velocityReduction = 0; // BLOCK
+            console.warn(`[ScalpEngine] 🛑 VELOCITY BLOCK: ${tradesLast60s} trades/min (3× max ${maxPerMin})`);
+            return 0;
+        }
+        if (tradesLast60s >= maxPerMin * 2) {
+            this._state.velocityReduction = 0.25;
+        } else if (tradesLast60s >= maxPerMin * 1.5) {
+            this._state.velocityReduction = 0.50;
+        } else if (tradesLast60s >= maxPerMin * 1.2) {
+            this._state.velocityReduction = 0.75;
+        } else {
+            this._state.velocityReduction = 1.0;
+        }
+
+        if (this._state.velocityReduction < 1.0) {
+            console.debug(`[ScalpEngine] Velocity throttle: ${tradesLast60s}/${maxPerMin}/min → size ×${this._state.velocityReduction}`);
+        }
+        return this._state.velocityReduction;
+    },
+
+    /** Record a trade emission for velocity tracking */
+    _recordTradeEmission(direction) {
+        this._state.recentTradeTimestamps.push(Date.now());
+        // Direction stickiness
+        this._state.lastTradeDirection = direction;
+        this._state.directionStickyUntil = Date.now() + this._config.directionSticky.maxDurationMs;
+        this._state.directionStickyCount = this._config.directionSticky.maxTrades;
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DIRECTION STICKINESS — avoid constant flipping
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Penalize direction flips unless strong reversal evidence exists.
+     * Modifies setup.score in-place. Returns true if flip was penalized.
+     */
+    _applyDirectionStickiness(setup, data) {
+        const lastDir = this._state.lastTradeDirection;
+        if (!lastDir) return false; // no history, no stickiness
+
+        const now = Date.now();
+        const isSticky = (now < this._state.directionStickyUntil) || (this._state.directionStickyCount > 0);
+        if (!isSticky) return false;
+
+        // Same direction → small bonus
+        if (setup.direction === lastDir) {
+            setup.score += 5;
+            setup.confirmations.push('direction_continuation');
+            return false;
+        }
+
+        // Different direction → check for strong reversal evidence
+        const hasStrongReversal =
+            setup.confirmations.includes('mss_bullish') ||
+            setup.confirmations.includes('mss_bearish') ||
+            setup.confirmations.includes('absorption') ||
+            setup.confirmations.includes('absorption_at_ob') ||
+            setup.confirmations.includes('absorption_confirmed') ||
+            setup.confirmations.includes('sweep_mss_linked') ||
+            setup.type === 'absorption_reversal';
+
+        if (hasStrongReversal) {
+            // Strong reversal → allow flip, clear stickiness
+            this._state.directionStickyCount = 0;
+            this._state.directionStickyUntil = 0;
+            setup.confirmations.push('reversal_override');
+            return false;
+        }
+
+        // No strong reversal → heavy penalty
+        const penalty = this._config.directionSticky.flipPenalty;
+        const origScore = setup.score;
+        setup.score = Math.round(setup.score * penalty);
+        setup.confirmations.push('direction_flip_penalty');
+        console.debug(`[ScalpEngine] Direction flip penalty: ${origScore} → ${setup.score} (×${penalty})`);
+        return true;
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CONTEXT MODULATION — Accelerators/Dampeners (NOT blockers)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Volume Profile as accelerator/dampener on setup.
+     * POC → reduce size | LVN → boost (fast moves) | VAH/VAL → boost reversals
+     */
+    _volumeProfileModulation(setup, data) {
+        const vp = data.volumeProfile;
+        if (!vp) return;
+        const price = data.currentPrice;
+        const proxPct = this._config.proximityPct;
+        const threshold = price * proxPct * 3;
+
+        // Near POC → reduce size (high liquidity = choppy)
+        if (vp.poc && Math.abs(price - vp.poc) < threshold) {
+            setup.sizeMultiplier = (setup.sizeMultiplier || 1.0) * 0.7;
+            setup.confirmations.push('poc_dampened');
+        }
+
+        // In LVN → fast moves expected, accelerate
+        const lvns = vp.lvn || [];
+        for (const lvn of lvns) {
+            const lvnPrice = lvn.price || lvn;
+            if (Math.abs(price - lvnPrice) < threshold) {
+                setup.score += 8;
+                setup.confirmations.push('lvn_accelerate');
+                break;
+            }
+        }
+
+        // Near VAH → boost short reversals | Near VAL → boost long reversals
+        if (vp.vah && Math.abs(price - vp.vah) < threshold && setup.direction === 'short') {
+            setup.score += 12;
+            setup.confirmations.push('vah_reversal_boost');
+        }
+        if (vp.val && Math.abs(price - vp.val) < threshold && setup.direction === 'long') {
+            setup.score += 12;
+            setup.confirmations.push('val_reversal_boost');
+        }
+    },
+
+    /**
+     * AMT (Auction Market Theory) modulation.
+     * BALANCE → favor mean reversion | IMBALANCE → favor continuation
+     */
+    _amtModulation(setup, data) {
+        const regime = data.marketState?.regime?.current;
+        if (!regime) return;
+
+        const isBalance = regime === 'range' || regime === 'ranging';
+        const isImbalance = regime === 'trending_up' || regime === 'trending_down' || regime === 'breakout';
+
+        const isReversalSetup = ['liquidity_sweep_reversal', 'volume_node_rejection', 'fvg_fill_rejection', 'absorption_reversal'].includes(setup.type);
+        const isContinuationSetup = ['micro_bos_continuation', 'micro_spike'].includes(setup.type);
+
+        if (isBalance) {
+            if (isReversalSetup) {
+                setup.score += 10;
+                setup.confirmations.push('amt_balance_reversal');
+            }
+            if (isContinuationSetup) {
+                setup.score -= 5;
+                setup.confirmations.push('amt_balance_cont_penalty');
+            }
+        }
+
+        if (isImbalance) {
+            if (isContinuationSetup) {
+                setup.score += 10;
+                setup.confirmations.push('amt_imbalance_continuation');
+            }
+            if (isReversalSetup) {
+                setup.score -= 8;
+                setup.confirmations.push('amt_imbalance_rev_penalty');
+            }
+        }
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MICROSTRUCTURE PRIORITY — order flow weight boost at high leverage
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * At high leverage, order flow signals get weighted more heavily.
+     * micro_scalp: OBI×1.5, CVD×1.5, TPS×2.0, LTB×2.0, Absorption×2.0
+     */
+    _microstructureBoost(setup, data) {
+        const mode = this._state.currentMode || this._getOperatingMode();
+        if (mode === 'swing_scalp') return; // no boost
+
+        const mult = mode === 'micro_scalp' ? 1.0 : 0.5; // hybrid gets half the bonus
+        const of = data.orderFlow;
+        if (!of) return;
+
+        let boost = 0;
+
+        // CVD acceleration
+        if (of.cumulativeDelta) {
+            const cdTrend = typeof of.cumulativeDelta === 'object' ? of.cumulativeDelta.trend : null;
+            const aligned = (setup.direction === 'long' && cdTrend === 'bullish') ||
+                (setup.direction === 'short' && cdTrend === 'bearish');
+            if (aligned) boost += Math.round(8 * mult);
+        }
+
+        // Absorption — KEY signal at high leverage
+        if (of.absorption?.detected) {
+            const absAligned = (setup.direction === 'long' && of.absorption.mostRecent?.direction === 'selling_absorbed') ||
+                (setup.direction === 'short' && of.absorption.mostRecent?.direction === 'buying_absorbed');
+            if (absAligned) boost += Math.round(12 * mult);
+        }
+
+        // Aggressive imbalance
+        if (of.aggressiveImbalance?.detected) {
+            const imbAligned = (setup.direction === 'long' && of.aggressiveImbalance.direction === 'buy_aggression') ||
+                (setup.direction === 'short' && of.aggressiveImbalance.direction === 'sell_aggression');
+            if (imbAligned) boost += Math.round(10 * mult);
+        }
+
+        // Delta divergence
+        if (of.deltaDivergence?.detected) {
+            const divAligned = (setup.direction === 'long' && of.deltaDivergence.direction === 'bullish') ||
+                (setup.direction === 'short' && of.deltaDivergence.direction === 'bearish');
+            if (divAligned) boost += Math.round(8 * mult);
+        }
+
+        if (boost > 0) {
+            setup.score += boost;
+            setup.confirmations.push(`microstructure_boost_${boost}`);
+            console.debug(`[ScalpEngine] Microstructure boost: +${boost} (mode=${mode})`);
+        }
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // NEW SCANNERS — Micro-Scalp Specific
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Micro Spike Scanner — detects sub-candle volume/delta bursts.
+     * Only active in micro_scalp or hybrid mode.
+     * Triggers: OBI ratio, CVD acceleration, volume spike, large trade burst.
+     */
+    _scanMicroSpike(data) {
+        const sensitivity = this._getSignalSensitivity();
+        if (!sensitivity.microSpikes) return null; // Only in micro_scalp
+
+        const { orderFlow, currentPrice, candles } = data;
+        if (!candles || candles.length < 5) return null;
+
+        let score = 20;
+        const confirmations = [];
+        let direction = null;
+
+        // Volume spike (last candle vs 10-candle avg)
+        const last = candles[candles.length - 1];
+        const windowSize = Math.min(10, candles.length - 1);
+        const avgVol = candles.slice(-windowSize - 1, -1)
+            .reduce((s, c) => s + (c.volume || 0), 0) / Math.max(windowSize, 1);
+
+        if (avgVol > 0 && last.volume > avgVol * 2.0) {
+            score += 15;
+            confirmations.push('volume_spike_2x');
+            // Direction from candle body
+            direction = last.close > last.open ? 'long' : 'short';
+        } else if (avgVol > 0 && last.volume > avgVol * 1.5) {
+            score += 8;
+            confirmations.push('volume_spike_1.5x');
+            direction = last.close > last.open ? 'long' : 'short';
+        }
+
+        // CVD acceleration
+        if (orderFlow?.cumulativeDelta) {
+            const cd = orderFlow.cumulativeDelta;
+            const cdVal = typeof cd === 'object' ? (cd.value || 0) : (cd || 0);
+            if (Math.abs(cdVal) > 500) {
+                score += 12;
+                direction = cdVal > 0 ? 'long' : 'short';
+                confirmations.push('cvd_acceleration');
+            }
+        }
+
+        // Aggressive imbalance (OBI proxy)
+        if (orderFlow?.aggressiveImbalance?.detected) {
+            score += 15;
+            direction = orderFlow.aggressiveImbalance.direction === 'buy_aggression' ? 'long' : 'short';
+            confirmations.push('obi_imbalance');
+        }
+
+        // Delta divergence (spike)
+        if (orderFlow?.deltaDivergence?.detected) {
+            score += 12;
+            direction = orderFlow.deltaDivergence.direction === 'bullish' ? 'long' : 'short';
+            confirmations.push('delta_spike');
+        }
+
+        if (!direction || confirmations.length < 2) return null; // Need at least 2 triggers
+
+        const modeConfig = this._getModeConfig();
+        const gate = this._config.minSetupScore * modeConfig.scannerGateMult;
+        if (score < gate) {
+            console.debug(`[ScalpEngine] _scanMicroSpike: score ${score} < gate ${gate}`);
+            return null;
+        }
+
+        return this._buildSetup('micro_spike', direction, score, confirmations, data);
+    },
+
+    /**
+     * Absorption Reversal Scanner — immediate counter-trade on absorption.
+     * "If aggressive buying + absorption → immediate short scalp"
+     * This is the KEY signal at high leverage per the spec.
+     */
+    _scanAbsorptionReversal(data) {
+        const mode = this._state.currentMode || this._getOperatingMode();
+        if (mode === 'swing_scalp') return null; // Only hybrid + micro_scalp
+
+        const { orderFlow, currentPrice, candles } = data;
+        if (!orderFlow?.absorption?.detected || !orderFlow.absorption.mostRecent) return null;
+        if (!candles || candles.length < 3) return null;
+
+        const abs = orderFlow.absorption.mostRecent;
+        const last = candles[candles.length - 1];
+        const prev = candles[candles.length - 2];
+
+        let score = 40;
+        const confirmations = ['absorption_key'];
+        let direction = null;
+
+        if (abs.direction === 'buying_absorbed') {
+            // Aggressive buying but price NOT rising → sellers absorbing → short
+            if (last.close <= prev.close * 1.0002) { // price flat or down
+                direction = 'short';
+                score += 15;
+                confirmations.push('buy_absorbed_flat');
+            }
+        } else if (abs.direction === 'selling_absorbed') {
+            // Aggressive selling but price NOT falling → buyers absorbing → long
+            if (last.close >= prev.close * 0.9998) { // price flat or up
+                direction = 'long';
+                score += 15;
+                confirmations.push('sell_absorbed_flat');
+            }
+        }
+
+        if (!direction) return null;
+
+        // Bonus: aggressive imbalance confirms
+        if (orderFlow.aggressiveImbalance?.detected) {
+            const oppAligned = (direction === 'short' && orderFlow.aggressiveImbalance.direction === 'buy_aggression') ||
+                (direction === 'long' && orderFlow.aggressiveImbalance.direction === 'sell_aggression');
+            if (oppAligned) {
+                score += 12;
+                confirmations.push('imbalance_confirms_absorption');
+            }
+        }
+
+        // Bonus: delta divergence
+        if (orderFlow.deltaDivergence?.detected) {
+            score += 8;
+            confirmations.push('delta_div_absorption');
+        }
+
+        const modeConfig = this._getModeConfig();
+        const gate = this._config.minSetupScore * modeConfig.scannerGateMult;
+        if (score < gate) return null;
+
+        return this._buildSetup('absorption_reversal', direction, score, confirmations, data);
     },
 
     /**
@@ -322,6 +840,11 @@ export const ScalpEngine = {
         const perfEnd = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this._state.lastLatencyMs = Math.round((perfEnd - perfStart) * 100) / 100;
 
+        // v4.0: Record trade emission for velocity + direction stickiness
+        if (this._state.bestSetup) {
+            this._recordTradeEmission(this._state.bestSetup.direction);
+        }
+
         return {
             active: this._state.bestSetup !== null,
             bestSetup: this._state.bestSetup,
@@ -331,7 +854,16 @@ export const ScalpEngine = {
             riskState: this._getRiskState(),
             eventSource: eventType,
             latencyMs: this._state.lastLatencyMs,
-            volatilityScore: volScore
+            volatilityScore: volScore,
+            // v4.0: Leverage-adaptive metadata
+            operatingMode: this._state.currentMode || this._getOperatingMode(),
+            velocityState: {
+                tradesPerMinute: this._state.recentTradeTimestamps.filter(t => Date.now() - t < 60000).length,
+                sizeReduction: this._state.velocityReduction,
+            },
+            netPnl: this._performance.netPnl,
+            recentWinRate: this._performance.recentWinRate,
+            profitGate: this._state.bestSetup?.profitGate || null,
         };
     },
 
@@ -353,6 +885,20 @@ export const ScalpEngine = {
         while (this._performance.history.length > this._config.tuning.rollingWindow * 2) {
             this._performance.history.shift();
         }
+
+        // ─── Net PnL tracking ───
+        const pnl = result.pnlPct || 0;
+        const feePct = result.feePct || ((this._config.takerFeePct || 0.04) * 2 * (this._state.currentLeverage || 10));
+        this._performance.grossPnl += pnl;
+        this._performance.totalFeesPaid += feePct;
+        this._performance.netPnl = this._performance.grossPnl - this._performance.totalFeesPaid;
+
+        // ─── Rolling win rate (last 20 trades) ───
+        const recent20 = this._performance.history.slice(-20);
+        if (recent20.length >= 5) {
+            this._performance.recentWinRate = recent20.filter(h => h.isWin).length / recent20.length;
+        }
+
         if (isWin) {
             this._state.consecutiveLosses = 0;
         } else {
@@ -363,6 +909,25 @@ export const ScalpEngine = {
                 this._state.lockReason = `${this._state.consecutiveLosses} consecutive scalp losses — cooling down`;
             }
         }
+
+        // ─── Win rate auto-reducer (Component 6.2) ───
+        const mode = this._state.currentMode || this._getOperatingMode();
+        if (this._performance.recentWinRate < 0.40 && mode !== 'swing_scalp') {
+            this._state.winRateThrottleActive = true;
+            this._state.winRateThrottleFactor = 0.7;
+            console.warn(`[ScalpEngine] ⚠️ Win rate ${(this._performance.recentWinRate * 100).toFixed(0)}% < 40% → throttle active`);
+        } else {
+            this._state.winRateThrottleActive = false;
+            this._state.winRateThrottleFactor = 1.0;
+        }
+
+        // ─── Overtrading detection + auto-downgrade (Component 6.3) ───
+        if (mode === 'micro_scalp' && this._state.consecutiveLosses >= 5) {
+            this._state.modeDowngradedUntil = Date.now() + (5 * 60 * 1000); // 5 min
+            this._state.currentMode = 'hybrid';
+            console.warn(`[ScalpEngine] 🛑 5 consecutive losses in micro_scalp → auto-downgrade to hybrid for 5 min`);
+        }
+
         this._selfTune();
     },
 
@@ -396,6 +961,15 @@ export const ScalpEngine = {
         this._state.lastEventSource = null;
         this._state.lastLatencyMs = 0;
         this._state.lastVolatilityScore = 0;
+        // v4.0: new state fields
+        this._state.recentTradeTimestamps = [];
+        this._state.velocityReduction = 1.0;
+        this._state.lastTradeDirection = null;
+        this._state.directionStickyUntil = 0;
+        this._state.directionStickyCount = 0;
+        this._state.winRateThrottleActive = false;
+        this._state.winRateThrottleFactor = 1.0;
+        this._state.modeDowngradedUntil = 0;
         this._radar = [];
     },
 
@@ -433,6 +1007,13 @@ export const ScalpEngine = {
 
     _getDynamicThreshold() {
         const leverage = this._state.currentLeverage || 10;
+        const mode = this._state.currentMode || this._getOperatingMode();
+        const modeConfig = this._getModeConfig();
+
+        // Mode-driven base: convert minConfidence to score (0.50 → 50, 0.70 → 70)
+        let dynamicMin = Math.round(modeConfig.minConfidence * 100);
+
+        // Legacy tier modifier still applies as fine-tuning
         let activeTier = this._config.frequency.tiers[0];
         for (const tier of this._config.frequency.tiers) {
             if (leverage <= tier.maxLeverage) {
@@ -440,11 +1021,19 @@ export const ScalpEngine = {
                 break;
             }
         }
-        let dynamicMin = this._config.minSetupScore + activeTier.minScoreMod;
+        dynamicMin += Math.round(activeTier.minScoreMod * 0.3); // reduced influence
+
+        // Under-trading → ease threshold slightly
         if (this._state.sessionScalpCount < activeTier.targetTradesPerDay * 0.5) {
             dynamicMin -= 2;
         }
-        console.debug(`[ScalpEngine] dynamicMinScore = ${dynamicMin} (leverage ${this._state.currentLeverage})`);
+
+        // Win rate throttle increases threshold
+        if (this._state.winRateThrottleActive) {
+            dynamicMin += 8;
+        }
+
+        console.debug(`[ScalpEngine] dynamicMinScore = ${dynamicMin} (mode=${mode}, leverage=${leverage}x)`);
         return Math.max(10, dynamicMin);
     },
 
@@ -455,31 +1044,41 @@ export const ScalpEngine = {
     async _fastScan(data, eventSource = 'CANDLE_CLOSE') {
         const { liquidity, marketState, orderFlow, currentPrice, candles } = data;
         const t0 = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+        const mode = this._state.currentMode || this._getOperatingMode();
 
         // --- Analysis Engine Integration ---
         const intent = typeof IntentEngine !== 'undefined' ? IntentEngine.detect(data) : { type: 'unknown', confidence: 0 };
         const preSignals = typeof PreSignalEngine !== 'undefined' ? PreSignalEngine.scan(data) : [];
 
-        // Spread filter
-        let spreadBlock = false;
+        // Spread filter (always hard block)
         if (typeof StateCache !== 'undefined') {
             const bestBid = StateCache.get('bestBid', 0);
             const bestAsk = StateCache.get('bestAsk', 0);
             if (bestBid > 0 && bestAsk > 0 && currentPrice > 0) {
                 const spreadPct = (bestAsk - bestBid) / currentPrice;
                 if (spreadPct > this._config.spreadHardBlockPct) {
-                    spreadBlock = true;
                     console.debug(`[ScalpEngine] Spread too wide (${(spreadPct * 100).toFixed(2)}%) – blocking`);
                     return [];
                 }
             }
         }
 
-        // --- Range Guard Integration ---
+        // --- Range Guard → Dampener (NOT hard block at high leverage) ---
         const rg = this._rangeGuard(data);
+        let rangeDampener = 1.0;
         if (rg.blocked) {
             console.debug(`[ScalpEngine] _rangeGuard: BLOCKED (${rg.reason})`);
-            return [];
+            return []; // swing_scalp still blocks
+        }
+        if (rg.dampener && rg.dampener < 1.0) {
+            rangeDampener = rg.dampener;
+            console.debug(`[ScalpEngine] _rangeGuard: dampened ×${rangeDampener}`);
+        }
+
+        // --- Velocity Control ---
+        const velocityMult = this._velocityControl();
+        if (velocityMult <= 0) {
+            return []; // velocity hard block (3× over threshold)
         }
 
         const regime = marketState?.regime?.current;
@@ -488,25 +1087,20 @@ export const ScalpEngine = {
         const volMult = this._volatilityPenaltyMultiplier(volScore);
         const dynamicMinScore = this._getDynamicThreshold();
 
-        const hasSweep = liquidity?.sweeps?.length > 0;
-        const hasOBs = liquidity?.orderBlocks?.length > 0;
-        const hasBOS = !!marketState?.structure?.lastBOS;
-        const hasMSS = !!marketState?.structure?.lastMSS;
-        const hasFVG = !!(data.indicators?.fvg);
-        const hasPOC = !!(data.volumeProfile?.poc);
-
         console.debug(
-            `[ScalpEngine._fastScan] vol=${volScore}(x${volMult}) limit=${dynamicMinScore} regime=${regime}(${regimeConf}%) ` +
-            `sweep=${hasSweep} OB=${hasOBs} BOS=${hasBOS} MSS=${hasMSS} FVG=${hasFVG} POC=${hasPOC} price=${currentPrice}`
+            `[ScalpEngine._fastScan] mode=${mode} vol=${volScore}(x${volMult}) limit=${dynamicMinScore} regime=${regime}(${regimeConf}%) price=${currentPrice}`
         );
 
-        // v3.0: Only 5 institutional scanners (retail scanners removed)
+        // v4.0: 5 institutional + 2 micro-scalp scanners
         const scanners = [
             async () => this._scanLiquiditySweepReversal(data),
             async () => this._scanOrderBlockRetest(data),
             async () => this._scanVolumeNodeRejection(data),
             async () => this._scanMicroBOSContinuation(data),
             async () => this._scanFVGFillRejection(data),
+            // NEW: Micro-scalp scanners (self-gate based on mode)
+            async () => this._scanMicroSpike(data),
+            async () => this._scanAbsorptionReversal(data),
         ];
 
         const scanResults = await Promise.all(scanners.map(s => s().catch(e => {
@@ -531,20 +1125,42 @@ export const ScalpEngine = {
                 if (intent.type !== 'unknown' && intent.confidence > 0.4) {
                     const intentAligned = (result.direction === 'long' && (intent.type === 'breakout' || intent.type === 'sweep')) ||
                         (result.direction === 'short' && (intent.type === 'breakout' || intent.type === 'sweep'));
-                    // Note: actual logic would be more specific to intent type
                     if (intentAligned) {
                         result.score += Math.round(intent.confidence * 15);
                         result.confirmations.push(`intent_${intent.type}`);
                     }
                 }
 
+                // ═══ NEW: Apply leverage-adaptive modulations ═══
+                this._microstructureBoost(result, data);
+                this._volumeProfileModulation(result, data);
+                this._amtModulation(result, data);
+                this._applyDirectionStickiness(result, data);
+
+                // Apply range dampener to size
+                if (rangeDampener < 1.0) {
+                    result.sizeMultiplier = (result.sizeMultiplier || 1.0) * rangeDampener;
+                    result.confirmations.push('equilibrium_dampened');
+                }
+
+                // Apply velocity reduction to size
+                if (velocityMult < 1.0) {
+                    result.sizeMultiplier = (result.sizeMultiplier || 1.0) * velocityMult;
+                    result.confirmations.push(`velocity_throttle_${Math.round(velocityMult * 100)}pct`);
+                }
+
+                // ═══ PROFIT GATE — mandatory fee check ═══
+                const profitCheck = this._profitGate(result);
+                if (!profitCheck.pass) {
+                    console.debug(`[ScalpEngine] Setup ${result.type} rejected by profit gate: ${profitCheck.reason}`);
+                    result.confirmations.push('profit_gate_rejected');
+                    continue; // skip this setup entirely
+                }
+                result.profitGate = profitCheck;
+
                 if (result.score >= dynamicMinScore) {
                     results.push(result);
-                    // Add to radar
-                    this._radar.push({
-                        ...result,
-                        timestamp: Date.now()
-                    });
+                    this._radar.push({ ...result, timestamp: Date.now() });
                     if (this._radar.length > 50) this._radar.shift();
                 } else {
                     console.debug(`[ScalpEngine] Setup ${result.type} dropped: score=${result.score} < req=${dynamicMinScore}`);
@@ -562,7 +1178,7 @@ export const ScalpEngine = {
 
         const t1 = (typeof performance !== 'undefined') ? performance.now() : Date.now();
         if (results.length > 0 || t1 - t0 > 5) {
-            console.debug(`[ScalpEngine._fastScan] ${results.length} setups found in ${(t1 - t0).toFixed(2)}ms`);
+            console.debug(`[ScalpEngine._fastScan] ${results.length} setups found in ${(t1 - t0).toFixed(2)}ms (mode=${mode})`);
         }
 
         return results.length > 1 ? this._deduplicateSetups(results) : results;
@@ -1524,7 +2140,8 @@ export const ScalpEngine = {
     _computeTradeManagement(direction, entryZone, data) {
         const atr = this._state.lastATR;
         const entryPrice = entryZone.center || (entryZone.low + entryZone.high) / 2;
-        const cfg = this._config.atr;
+        // v4.0: Use mode-aware ATR profile (micro_scalp = tighter TP/SL)
+        const cfg = this._getActiveATRProfile();
         let stopLoss, tp1, tp2, tp3;
         if (direction === 'long') {
             stopLoss = entryPrice - atr * cfg.stopMultiple;
@@ -1612,29 +2229,36 @@ export const ScalpEngine = {
     },
 
     /**
-     * Range Guard: Filter out trades in equilibrium zone (40-60% of daily range)
+     * Range Guard: Equilibrium zone (40-60% of daily range).
+     * swing_scalp → BLOCKS trades (original behavior).
+     * hybrid/micro_scalp → DAMPENS (reduce size, not block).
      */
     _rangeGuard(data) {
-        if (!data.candles || data.candles.length < 50) return { blocked: false };
+        if (!data.candles || data.candles.length < 50) return { blocked: false, dampener: 1.0 };
         
         const dayCandles = data.candles.slice(-100);
         const dayHigh = Math.max(...dayCandles.map(c => c.high));
         const dayLow = Math.min(...dayCandles.map(c => c.low));
         const range = dayHigh - dayLow;
         
-        if (range === 0) return { blocked: true, reason: 'zero_range' };
+        if (range === 0) return { blocked: true, reason: 'zero_range', dampener: 0 };
         
         const equilibriumLow = dayLow + (range * 0.40);
         const equilibriumHigh = dayLow + (range * 0.60);
         const currentPrice = data.currentPrice;
-        
         const isEquilibrium = currentPrice >= equilibriumLow && currentPrice <= equilibriumHigh;
         
         if (isEquilibrium) {
-            return { blocked: true, reason: 'equilibrium_zone' };
+            const mode = this._state.currentMode || this._getOperatingMode();
+            if (mode === 'swing_scalp') {
+                return { blocked: true, reason: 'equilibrium_zone', dampener: 0 };
+            }
+            // High leverage: dampen, don't block
+            const dampener = mode === 'micro_scalp' ? 0.6 : 0.7;
+            return { blocked: false, dampener, reason: 'equilibrium_dampened' };
         }
         
-        return { blocked: false };
+        return { blocked: false, dampener: 1.0 };
     },
 
     _updateCooldown() {

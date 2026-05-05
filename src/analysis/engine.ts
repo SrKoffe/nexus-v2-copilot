@@ -102,19 +102,24 @@ export class MasterAnalysisEngine {
 
             EventBus.emit('ANALYSIS_SIGNAL', finalSignal);
 
-            // 5. Execution Gate: Dynamic Thresholds
+            // 5. Execution Gate: Leverage-Adaptive Thresholds (v4.0)
             const regime = mse.regime?.current || 'range';
             const volScore = ScalpEngine._state?.lastVolatilityScore || 50;
+            const operatingMode = ScalpEngine._state?.currentMode || 'swing_scalp';
             
-            // Adapt threshold to market conditions
-            let executionThreshold = 0.65; // Standard
-            if (volScore > 70) executionThreshold = 0.75; // Pre-news / High noise filter
-            if (regime === 'range') executionThreshold = 0.55; // Earlier entry in accumulation
+            // Mode-aware threshold: micro_scalp is more aggressive
+            let executionThreshold = 0.65; // swing_scalp default
+            if (operatingMode === 'micro_scalp') executionThreshold = 0.50;
+            else if (operatingMode === 'hybrid') executionThreshold = 0.55;
+
+            // Market condition modifiers (still apply on top)
+            if (volScore > 70) executionThreshold += 0.10; // Pre-news / High noise filter
+            if (regime === 'range' && operatingMode === 'swing_scalp') executionThreshold -= 0.10;
 
             // Co-pilot: when threshold reached, EMIT setup (no execution).
             // Frontend SetupCard renders it; user decides whether to trade on MEXC.
             if (probability >= executionThreshold && direction.bias !== 'neutral' && !this.isProcessing) {
-                console.log(`📡 [SETUP] Threshold reached (${(probability*100).toFixed(0)}% >= ${(executionThreshold*100).toFixed(0)}%) — emitting recommendation`);
+                console.log(`📡 [SETUP] Threshold reached (${(probability*100).toFixed(0)}% >= ${(executionThreshold*100).toFixed(0)}%) mode=${operatingMode} — emitting recommendation`);
                 this._emitSetup(direction.bias, probability, currentPrice);
             }
 

@@ -1,7 +1,7 @@
 use log::info;
 
 /// Risk Manager — controls position sizing and loss limits.
-/// Ports `riskManager.ts` to Rust.
+/// v4.0: Leverage-adaptive risk controls for micro-scalping.
 pub struct RiskManager {
     pub max_risk_pct: f64,             // Max risk per trade (1%)
     pub max_consecutive_losses: u32,    // Lock after N consecutive losses
@@ -53,6 +53,53 @@ impl RiskManager {
             return Err(format!("Daily loss limit reached: {:.2}%", self.daily_pnl * 100.0));
         }
         Ok(())
+    }
+
+    /// v4.0: Leverage-aware trading check.
+    /// Higher leverage → more room for daily losses and consecutive losses.
+    pub fn can_trade_for_leverage(&self, leverage: u32) -> Result<(), String> {
+        if self.is_locked {
+            return Err(self.lock_reason.clone().unwrap_or("Risk locked".into()));
+        }
+        let max_daily = self.max_daily_loss_for_leverage(leverage);
+        if self.daily_pnl <= -max_daily {
+            return Err(format!(
+                "Daily loss limit for {}x reached: {:.2}% (max: {:.1}%)",
+                leverage,
+                self.daily_pnl * 100.0,
+                max_daily * 100.0
+            ));
+        }
+        let max_consec = self.max_consecutive_for_leverage(leverage);
+        if self.consecutive_losses >= max_consec {
+            return Err(format!(
+                "{} consecutive losses at {}x (max: {})",
+                self.consecutive_losses, leverage, max_consec
+            ));
+        }
+        Ok(())
+    }
+
+    /// Leverage-adaptive max daily loss.
+    /// Higher leverage = more trades = higher tolerance for daily drawdown.
+    pub fn max_daily_loss_for_leverage(&self, leverage: u32) -> f64 {
+        match leverage {
+            0..=10   => 0.05,  // 5% daily max — swing_scalp
+            11..=50  => 0.08,  // 8% — hybrid, more room for micro-scalp frequency
+            51..=100 => 0.10,  // 10% — micro_scalp
+            _        => 0.12,  // 12% — extreme leverage, high frequency needs more runway
+        }
+    }
+
+    /// Leverage-adaptive consecutive loss limit.
+    /// Micro-scalp: expect more individual losses, compensate with trade volume.
+    pub fn max_consecutive_for_leverage(&self, leverage: u32) -> u32 {
+        match leverage {
+            0..=10   => 3,
+            11..=50  => 5,
+            51..=100 => 7,
+            _        => 10,  // micro-scalp: expect more losses, compensate with volume
+        }
     }
 
     /// Record trade outcome
@@ -141,4 +188,45 @@ mod tests {
         rm.record_outcome(-0.025); // Total -5.5% → LOCKED
         assert!(rm.is_locked);
     }
+
+    // v4.0: Leverage-adaptive tests
+
+    #[test]
+    fn test_leverage_adaptive_daily_limits() {
+        let rm = RiskManager::new();
+        assert!((rm.max_daily_loss_for_leverage(5) - 0.05).abs() < 0.001);
+        assert!((rm.max_daily_loss_for_leverage(25) - 0.08).abs() < 0.001);
+        assert!((rm.max_daily_loss_for_leverage(100) - 0.10).abs() < 0.001);
+        assert!((rm.max_daily_loss_for_leverage(200) - 0.12).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_leverage_adaptive_consecutive_limits() {
+        let rm = RiskManager::new();
+        assert_eq!(rm.max_consecutive_for_leverage(5), 3);
+        assert_eq!(rm.max_consecutive_for_leverage(25), 5);
+        assert_eq!(rm.max_consecutive_for_leverage(75), 7);
+        assert_eq!(rm.max_consecutive_for_leverage(200), 10);
+    }
+
+    #[test]
+    fn test_can_trade_for_leverage_daily_limit() {
+        let mut rm = RiskManager::new();
+        // At x100, daily limit is 10%
+        rm.daily_pnl = -0.09; // -9%, still under 10%
+        assert!(rm.can_trade_for_leverage(100).is_ok());
+        rm.daily_pnl = -0.11; // -11%, over 10%
+        assert!(rm.can_trade_for_leverage(100).is_err());
+    }
+
+    #[test]
+    fn test_can_trade_for_leverage_consecutive_limit() {
+        let mut rm = RiskManager::new();
+        // At x100, consecutive limit is 7
+        rm.consecutive_losses = 6;
+        assert!(rm.can_trade_for_leverage(100).is_ok());
+        rm.consecutive_losses = 7;
+        assert!(rm.can_trade_for_leverage(100).is_err());
+    }
 }
+
