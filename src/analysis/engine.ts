@@ -8,6 +8,7 @@ import { LiquidityEngine } from './liquidity';
 import { ScalpEngine } from './scalp-engine';
 import { ConfluenceEngine } from './confluence';
 import { VolumeProfile } from './volume-profile';
+import { useNexusStore } from '../store';
 
 export class MasterAnalysisEngine {
     constructor() {
@@ -149,7 +150,6 @@ export class MasterAnalysisEngine {
 
     processLevel1Signal(payload) {
         // Level 2: Confluence & AMT Spatial Validation
-        const { useNexusStore } = require('../store');
         const setStatus = useNexusStore.getState().updatePipelineStatus;
         
         setStatus(2, 'evaluating', payload.directionBias, 'Validating AMT...');

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { EventBus } from './event-bus';
 import { StateCache } from './state-cache';
+import { useNexusStore } from '../store';
 import { LiquidityEngine } from './liquidity';
 import { MarketStateEngine } from './market-state';
 
@@ -146,7 +147,6 @@ export const ScalpEngine = {
     },
 
     processLevel2Setup(payload) {
-        const { useNexusStore } = require('../store');
         const setStatus = useNexusStore.getState().updatePipelineStatus;
         const setPending = useNexusStore.getState().setPendingSetup;
         const leverage = useNexusStore.getState().leverage;

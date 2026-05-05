@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// ANTIGRAVITY V2 — HFT Trading Terminal
+// NEXUS V2 — MEXC Trading Co-Pilot
 // Core Library — Tauri Entry Point
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -17,7 +17,8 @@ use core::database::Database;
 use core::event_bus::EventBus;
 use execution::engine::ExecutionEngine;
 use engine::state_manager::{StateManager, SystemState};
-use market_data::websocket::BinanceStream;
+use market_data::websocket::MexcStream;
+use market_data::mexc_private::{MexcPrivateClient, AccountAsset, OpenPosition, try_build_from_env};
 use risk::manager::RiskManager;
 
 // ─── TAURI STATE ────────────────────────────────────────────────────────────
@@ -29,6 +30,9 @@ struct AppState {
     execution: Arc<ExecutionEngine>,
     state_manager: Arc<StateManager>,
     risk_manager: Arc<Mutex<RiskManager>>,
+    /// MEXC private API client. None if API keys not set in .env — Tauri commands
+    /// then return informative errors instead of crashing.
+    mexc_private: Option<Arc<MexcPrivateClient>>,
 }
 
 // ─── IPC COMMANDS (Replace Electron ipcMain.handle) ─────────────────────────
@@ -46,19 +50,13 @@ async fn save_config(state: tauri::State<'_, AppState>, key: String, value: Stri
     Ok(true)
 }
 
-/// Toggle live trading mode
-#[tauri::command]
-async fn toggle_live_trading(state: tauri::State<'_, AppState>, is_live: bool) -> Result<(), String> {
-    state.execution.set_live_trading(is_live);
-    Ok(())
-}
-
-/// Toggle oracle mode (blocks all execution)
-#[tauri::command]
-async fn toggle_oracle_mode(state: tauri::State<'_, AppState>, enabled: bool) -> Result<(), String> {
-    state.execution.set_oracle_mode(enabled);
-    Ok(())
-}
+// ─── REMOVED in F5 (Oracle permanent) ──────────────────────────────────────
+// `toggle_live_trading` and `toggle_oracle_mode` were deleted because Nexus V2
+// is co-pilot only. Execution is permanently disabled at the engine level
+// (see ExecutionEngine in src/execution/engine.rs). Re-enabling autonomous
+// execution must be done as a deliberate, audited code change — not a runtime
+// toggle. This eliminates the chance that a UI bug or compromised state ever
+// flips the system into live-trading mode.
 
 /// Get current system state
 #[tauri::command]
@@ -135,7 +133,7 @@ async fn fetch_historical_candles(
     interval: String,
     limit: u32,
 ) -> Result<Vec<market_data::types::Kline>, String> {
-    market_data::history::fetch_binance_klines(&symbol, &interval, limit).await
+    market_data::history::fetch_mexc_klines(&symbol, &interval, limit).await
 }
 
 #[tauri::command]
@@ -144,15 +142,95 @@ fn set_vol_trigger(state: tauri::State<AppState>, allow: bool) {
     log::info!("⚡ [CONFIG] Volatility Trigger: {}", if allow { "ENABLED" } else { "DISABLED" });
 }
 
+// ─── MEXC Private API (read-only) — F6 ─────────────────────────────────────
+
+/// Get MEXC futures USDT equity (available + frozen + unrealized).
+/// Returns Err with explanation if .env doesn't have MEXC_API_KEY/SECRET.
+#[tauri::command]
+async fn get_mexc_balance(state: tauri::State<'_, AppState>) -> Result<f64, String> {
+    let client = state
+        .mexc_private
+        .as_ref()
+        .ok_or("MEXC API keys not set. Add MEXC_API_KEY and MEXC_API_SECRET to .env (read-only key).")?;
+    client.fetch_usdt_equity().await
+}
+
+/// Get all account assets (more detail than just balance).
+#[tauri::command]
+async fn get_mexc_account(state: tauri::State<'_, AppState>) -> Result<Vec<AccountAsset>, String> {
+    let client = state
+        .mexc_private
+        .as_ref()
+        .ok_or("MEXC API keys not set in .env")?;
+    client.fetch_account_assets().await
+}
+
+/// Get all open positions on MEXC futures.
+#[tauri::command]
+async fn get_mexc_positions(state: tauri::State<'_, AppState>) -> Result<Vec<OpenPosition>, String> {
+    let client = state
+        .mexc_private
+        .as_ref()
+        .ok_or("MEXC API keys not set in .env")?;
+    client.fetch_open_positions().await
+}
+
+/// Quick check: are MEXC API keys configured? Used by frontend to show/hide
+/// the "configure API key" prompt.
+#[tauri::command]
+fn mexc_keys_configured(state: tauri::State<AppState>) -> bool {
+    state.mexc_private.is_some()
+}
+
+// ─── Setup outcomes persistence + weekly report (F8) ───────────────────────
+
+/// Persist a marked outcome with full metadata (symbol, leverage, classification, etc).
+/// Replaces the older minimalistic `record_trade_outcome` for the F8 reporting flow.
+#[tauri::command]
+async fn record_setup_outcome(
+    state: tauri::State<'_, AppState>,
+    outcome: core::database::SetupOutcome,
+) -> Result<i64, String> {
+    // Also feed RiskManager so daily PnL / consecutive-loss lockout updates.
+    {
+        let mut rm = state.risk_manager.lock().await;
+        rm.record_outcome(outcome.pnl_pct / 100.0); // store keeps fraction
+    }
+    state.db.record_setup_outcome(&outcome).map_err(|e| e.to_string())
+}
+
+/// Query outcomes within a [start_ms, end_ms) range. Used by the weekly report.
+#[tauri::command]
+fn query_setup_outcomes(
+    state: tauri::State<AppState>,
+    start_ms: i64,
+    end_ms: i64,
+) -> Vec<core::database::SetupOutcome> {
+    state.db.query_setup_outcomes(start_ms, end_ms)
+}
+
+/// Write a markdown report to a host file path. Used to drop weekly reports
+/// into the user's Obsidian vault (or any path they choose).
+#[tauri::command]
+fn write_report_to_vault(path: String, content: String) -> Result<String, String> {
+    let p = std::path::PathBuf::from(&path);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create dir {:?}: {}", parent, e))?;
+    }
+    std::fs::write(&p, content).map_err(|e| format!("Failed to write {}: {}", path, e))?;
+    Ok(path)
+}
+
 // ─── TAURI ENTRY POINT ─────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize database
+    // Initialize database — stored under %APPDATA%\nexus-v2-copilot\nexus.db on Windows
     let db_path = dirs_next::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("antigravity-v2")
-        .join("antigravity.db");
+        .join("nexus-v2-copilot")
+        .join("nexus.db");
 
     // Ensure parent directory exists
     if let Some(parent) = db_path.parent() {
@@ -160,7 +238,7 @@ pub fn run() {
     }
 
     let db = Arc::new(
-        Database::new(db_path.to_str().unwrap_or("antigravity.db"))
+        Database::new(db_path.to_str().unwrap_or("nexus.db"))
             .expect("Failed to initialize database")
     );
 
@@ -168,6 +246,7 @@ pub fn run() {
     let execution = Arc::new(ExecutionEngine::new(db.clone()));
     let state_manager = Arc::new(StateManager::new());
     let risk_manager = Arc::new(Mutex::new(RiskManager::new()));
+    let mexc_private = try_build_from_env().map(Arc::new);
 
     let app_state = AppState {
         db,
@@ -175,6 +254,7 @@ pub fn run() {
         execution: execution.clone(),
         state_manager: state_manager.clone(),
         risk_manager,
+        mexc_private,
     };
 
     tauri::Builder::default()
@@ -183,62 +263,48 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_config,
             save_config,
-            toggle_live_trading,
-            toggle_oracle_mode,
             get_system_state,
             set_leverage,
             get_trade_history,
             get_win_rate,
-            execute_auto_order,
+            execute_auto_order,    // permanently returns blocked — kept for audit trail
             get_active_position,
             set_vol_trigger,
             record_trade_outcome,
             get_risk_state,
             fetch_historical_candles,
+            // F6: MEXC private API (read-only)
+            get_mexc_balance,
+            get_mexc_account,
+            get_mexc_positions,
+            mexc_keys_configured,
+            // F8: outcome persistence + weekly report
+            record_setup_outcome,
+            query_setup_outcomes,
+            write_report_to_vault,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
 
-            // Start Binance WebSocket stream
-            let binance = BinanceStream::new("btcusdt");
+            // Start MEXC futures WebSocket stream
+            // Symbol uses MEXC contract format with underscore: BTC_USDT, ETH_USDT, etc.
+            let mexc = MexcStream::new("BTC_USDT");
             let sender = event_bus.sender();
-            binance.start(sender, handle.clone());
+            mexc.start(sender, handle.clone());
 
-            // Start state price updater and Position Tracker — listens to ticks and updates StateManager
+            // Tick listener — only job in co-pilot mode is keeping StateManager's
+            // price field current for any future feature that needs the latest tick.
+            // Auto SL/TP exit logic was removed in F5: in co-pilot mode the user
+            // executes (and exits) manually on MEXC, then marks the outcome here.
             let sm = state_manager.clone();
-            let exec_tracker = execution.clone();
             let mut rx = event_bus.subscribe();
             tauri::async_runtime::spawn(async move {
                 loop {
                     match rx.recv().await {
                         Ok(core::event_bus::SystemEvent::MarketTick(tick)) => {
                             sm.update_price(tick.price);
-                            
-                            // Call the Level 1 Gatekeeper
-                            sm.analyze(tick.price, &handle).await;
-                            
-                            // 📡 Analysis pipeline is now handled by the React frontend
-                            
-                            // 🎯 Position Tracker Logic (Check SL/TP)
-                            if let Some(pos) = exec_tracker.get_active_position().await {
-                                let mut should_close = false;
-                                let is_long = pos.direction == execution::types::Direction::Long;
-                                
-                                if is_long {
-                                    if tick.price >= pos.take_profit.unwrap_or(f64::MAX) || tick.price <= pos.stop_loss.unwrap_or(0.0) {
-                                        should_close = true;
-                                    }
-                                } else {
-                                    if tick.price <= pos.take_profit.unwrap_or(0.0) || tick.price >= pos.stop_loss.unwrap_or(f64::MAX) {
-                                        should_close = true;
-                                    }
-                                }
-
-                                if should_close {
-                                    exec_tracker.close_position().await;
-                                    sm.unlock_sniper();
-                                }
-                            }
+                            // Level 1 Gatekeeper: Evaluate tick for microstructure activity
+                            let _ = sm.analyze(tick.price, &handle).await;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                             log::warn!("[StateUpdater] Skipped {} events", n);
@@ -248,7 +314,7 @@ pub fn run() {
                 }
             });
 
-            log::info!("🛸 ANTIGRAVITY V2 — All systems online");
+            log::info!("🛸 NEXUS V2 CO-PILOT — All systems online (MEXC futures)");
             Ok(())
         })
         .run(tauri::generate_context!())

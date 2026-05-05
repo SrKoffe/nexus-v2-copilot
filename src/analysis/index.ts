@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { EventBus } from './event-bus';
 import { candleManager } from './candle-manager';
 import { maestro } from './engine';
+import { ScalpEngine } from './scalp-engine';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
@@ -19,7 +20,6 @@ export async function initAnalysisPipeline() {
 
     // 1. Initialize Engines
     maestro.init();
-    const { ScalpEngine } = require('./scalp-engine');
     ScalpEngine.init();
 
     // 1.5 Fetch History to Bootstrap Indicators/Engines
