@@ -1,30 +1,26 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
- * LeverageAdjustedRiskEngine — SCALPER MODEL (margin-PnL targets)
+ * LeverageAdjustedRiskEngine — SCALPER MODEL (margin-PnL targets) + EV gate (v5.2)
  * ═══════════════════════════════════════════════════════════════════════════════
  *
- * Roberto's mental model (refatorado em F7):
+ * Layered gates, in order:
  *
- *   "Quanto maior a leverage, menor o TP em distância de preço.
- *    O alvo é uma % FIXA de PnL líquido sobre a margem (3-10%) depois de fees."
+ *   1. minConfidence       — basic prior on the analytical signal
+ *   2. structureTolerance  — SL ajustado não pode violar estrutura natural
+ *   3. minSurvival         — folga até liquidação
+ *   4. NEGATIVE_NET_PROFIT — TP nets must be positive (config sanity)
+ *   5. TP_LARGER_THAN_NATURAL — TP target shouldn't exceed naturalTP × 1.5
+ *   6. EV_NOT_POSITIVE     — v5.2: Expected Value, after fees+slippage, must
+ *                            exceed (fees + slippage) × evMultiplier (default 1.2)
  *
- * Isso muda fundamentalmente o cálculo:
- *
- * ─ ANTES (R-multiples):  TP = 1× ou 2× distância do SL
- *                          → em x100 com SL 0.45%, TP = 0.9% (90% margem) — swing-style
- *
- * ─ AGORA (margin-PnL):    TP = (target_net + fees) / leverage
- *                          → em x100 com TP_net 3%, TP = 0.11% (3% líquido) — scalp-style
- *
- * Em scalping de alta-leverage, RR convencional ≥ 1.5 não se aplica. O
- * profit factor vem do WIN RATE, não da magnitude individual. Por isso
- * removemos o `minRR` gate — ele rejeitaria todo setup válido nesse modelo.
- *
- * O sistema agora mostra o BREAK-EVEN win rate pra cada setup (a porcentagem
- * mínima de wins que torna o setup lucrativo dado o RR efetivo). Isso dá
- * transparência total — Roberto vê se a confidence prevista cobre o WR
- * necessário.
+ * The EV gate is the most important addition: it forces every accepted setup
+ * to have measurable statistical edge over friction. Probability comes from
+ * `ProbabilityModel.estimateHitProbability()` which is heuristic until ≥30
+ * outcomes are accumulated for calibration (see v5.2c flag in UI).
  */
+
+import { ProbabilityModel } from './probability-model';
+import type { Regime } from './regime-engine';
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +37,16 @@ export interface NaturalSetup {
     /** Confidence da análise (0..1) */
     confidence: number;
     reason: string;
+
+    // ─── Optional v5.2 hints ───
+    /** ATR em valor absoluto de preço — usado pelo ProbabilityModel pra distance penalty */
+    atr?: number;
+    /** Momentum aligned -1..+1 (positivo = aligned with direction) */
+    momentumAlignment?: number;
+    /** Liquidity strength 0..1 no nível do target */
+    liquidityStrength?: number;
+    /** Regime atual — usado pelo ProbabilityModel pra alignment bonus */
+    regime?: Regime;
 }
 
 export interface AdjustedSetup {
@@ -71,12 +77,27 @@ export interface AdjustedSetup {
     /** Fees totais round-trip em % da margem */
     feesMarginPct: number;
 
+    /** Slippage estimado round-trip em % da margem (v5.2) */
+    slippageMarginPct: number;
+
     /**
      * Break-even win rate (0..1): com SL atual e TP2 atual, qual % de wins
      * é necessária pra o sistema ficar no zero. Valores acima da confidence
      * média = sinal de alerta.
      */
     breakEvenWinRate: number;
+
+    // ─── Expected Value (v5.2) ───
+    /** Probability estimate that TP1 hits before SL */
+    probabilityHit: number;
+    /** EV in % of margin, net of fees + slippage */
+    expectedValueMarginPct: number;
+    /** EV / total cost ratio (>0 means edge) */
+    evCostRatio: number;
+    /** "heuristic" until ≥30 outcomes; then "fitted" */
+    probabilityCalibration: 'heuristic' | 'fitted';
+    /** Human-readable EV reasoning */
+    evExplanation: string;
 
     leverage: number;
 
@@ -103,7 +124,8 @@ export interface RejectedSetup {
         | 'SURVIVAL_TOO_LOW'
         | 'CONFIDENCE_TOO_LOW'
         | 'INVALID_INPUT'
-        | 'NEGATIVE_NET_PROFIT';
+        | 'NEGATIVE_NET_PROFIT'
+        | 'EV_NOT_POSITIVE';
 }
 
 export type SetupResult = AdjustedSetup | RejectedSetup;
@@ -138,6 +160,13 @@ export interface LeverageRiskConfig {
 
     /** Target NET PnL em % da margem pra TP2 (parcial 50%). Default: 8% */
     tp2TargetNetMarginPct: number;
+
+    // ─── v5.2: EV gate ───
+    /** Estimated round-trip slippage as % of nominal. Default 0.03% (MEXC futures). */
+    slippagePct: number;
+
+    /** EV must exceed (fees+slip) × evMultiplier to accept. Default 1.2 (20% buffer over friction). */
+    evMultiplier: number;
 }
 
 export const DEFAULT_CONFIG: LeverageRiskConfig = {
@@ -150,6 +179,8 @@ export const DEFAULT_CONFIG: LeverageRiskConfig = {
     takerFeePct: 0.04,
     tp1TargetNetMarginPct: 3,
     tp2TargetNetMarginPct: 8,
+    slippagePct: 0.03,        // 0.03% round-trip — MEXC 1m futures average
+    evMultiplier: 1.2,        // 20% buffer over (fees+slip)
 };
 
 // ─── Tabela de SL alvo por leverage (mantida do modelo anterior) ───────────
@@ -326,6 +357,56 @@ export const LeverageAdjustedRiskEngine = {
             warnings.push(`Survival ${(survivalScore * 100).toFixed(0)}% — folga apertada até liquidação.`);
         }
 
+        // ─── 10.5. Expected Value gate (v5.2) ───
+        // Slippage in margin terms: slip_pct × leverage (per trade) × 2 (round-trip)
+        const slippageMarginPct = config.slippagePct * 2 * leverage;
+
+        // Probability that TP1 hits before SL — heuristic until calibrated.
+        // Use TP1 (50% partial) as the conservative anchor: it's the easier of the two.
+        const probResult = ProbabilityModel.estimateHitProbability({
+            entryPrice: setup.entryPrice,
+            target: takeProfit1,
+            stop: stopLoss,
+            direction: setup.direction as 'long' | 'short',
+            momentumAlignment: setup.momentumAlignment,
+            liquidityStrength: setup.liquidityStrength,
+            atr: setup.atr,
+            regime: setup.regime,
+        });
+
+        // Blended TP gain: 50% at TP1 net + 50% at TP2 net (matches outcome semantics)
+        const blendedTpNet = 0.5 * effectiveTp1Net + 0.5 * effectiveTp2Net;
+
+        const ev = ProbabilityModel.expectedValueMarginPct({
+            probability: probResult.probability,
+            tpGrossMarginPct: blendedTpNet,                 // already net of fees in our model
+            slLossMarginPct: slMarginPct,
+            feesMarginPct,
+            slippageMarginPct,
+        });
+
+        const totalCost = feesMarginPct + slippageMarginPct;
+        const evThreshold = totalCost * config.evMultiplier;
+
+        if (ev.ev < evThreshold) {
+            return {
+                accepted: false,
+                code: 'EV_NOT_POSITIVE',
+                reason:
+                    `EV ${ev.ev.toFixed(2)}% < threshold ${evThreshold.toFixed(2)}% margem ` +
+                    `(p=${(probResult.probability * 100).toFixed(0)}%, fees+slip=${totalCost.toFixed(2)}%, blended TP=${blendedTpNet.toFixed(1)}%, SL=${slMarginPct.toFixed(1)}%). ` +
+                    `Sem edge estatístico.`,
+            };
+        }
+
+        // EV warnings (non-blocking but visible)
+        if (probResult.calibration === 'heuristic') {
+            warnings.push(`EV based on heuristic probability (${(probResult.probability * 100).toFixed(0)}%) — calibrate after ≥30 outcomes.`);
+        }
+        if (ev.ratio < 0.5) {
+            warnings.push(`Edge thin: EV/cost ratio ${ev.ratio.toFixed(2)}. Pequenas mudanças de probability quebram o setup.`);
+        }
+
         return {
             accepted: true,
             symbol: setup.symbol,
@@ -343,7 +424,13 @@ export const LeverageAdjustedRiskEngine = {
             takeProfit2MarginGross: tp2GrossMargin,
             takeProfit2MarginNet: config.tp2TargetNetMarginPct,
             feesMarginPct,
+            slippageMarginPct,
             breakEvenWinRate,
+            probabilityHit: probResult.probability,
+            expectedValueMarginPct: ev.ev,
+            evCostRatio: ev.ratio,
+            probabilityCalibration: probResult.calibration,
+            evExplanation: probResult.explanation,
             leverage,
             positionSizeUsd,
             notionalUsd,

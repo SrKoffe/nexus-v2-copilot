@@ -19,6 +19,7 @@ import './App.css';
 import { initAnalysisPipeline } from './analysis';
 import { EventBus } from './analysis/event-bus';
 import { LeverageAdjustedRiskEngine, DEFAULT_CONFIG, type NaturalSetup } from './analysis/leverage-risk';
+import { RegimeEngine } from './analysis/regime-engine';
 import { ScalpEngine } from './analysis/scalp-engine';
 import { useNexusStore } from './store';
 
@@ -83,6 +84,28 @@ function App() {
         // Subscribe to SETUP_DETECTED on internal EventBus (emitted by Maestro)
         const handleSetup = (natural: NaturalSetup) => {
             const s = useNexusStore.getState();
+
+            // v5.2d: hard block via regime behavior hint.
+            // CHAOTIC regime returns block=true and we reject before running the
+            // EV pipeline at all. Other regimes flow through normally.
+            const hint = RegimeEngine.behaviorHint(s.currentRegime);
+            if (hint.block) {
+                const blockedEntry = {
+                    natural,
+                    adjusted: {
+                        accepted: false as const,
+                        code: 'EV_NOT_POSITIVE' as const, // closest existing code; v5.2 reuses it for chaos
+                        reason: `Regime ${s.currentRegime.toUpperCase()} blocks setups (volatility spike + whipsaw)`,
+                    },
+                    detectedAt: Date.now(),
+                    outcome: null,
+                    pnlPct: null,
+                };
+                setPendingSetup(blockedEntry);
+                addToHistory(blockedEntry);
+                return;
+            }
+
             // Build config: defaults + user overrides from store (F7 scalper config)
             const config = {
                 ...DEFAULT_CONFIG,
@@ -90,10 +113,16 @@ function App() {
                 tp2TargetNetMarginPct: s.tp2NetTarget,
                 takerFeePct: s.takerFeePct,
             };
-            const adjusted = LeverageAdjustedRiskEngine.adjust(natural, s.leverage, s.balanceUsd, config);
+            // v5.2: enrich natural setup with current regime so ProbabilityModel
+            // can apply alignment bonus/penalty.
+            const enriched: NaturalSetup = {
+                ...natural,
+                regime: natural.regime ?? s.currentRegime,
+            };
+            const adjusted = LeverageAdjustedRiskEngine.adjust(enriched, s.leverage, s.balanceUsd, config);
 
             const entry = {
-                natural,
+                natural: enriched,
                 adjusted,
                 detectedAt: Date.now(),
                 outcome: null,
