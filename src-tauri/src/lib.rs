@@ -12,14 +12,25 @@ pub mod engine;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tauri::Manager;
 
 use core::database::Database;
 use core::event_bus::EventBus;
 use execution::engine::ExecutionEngine;
 use engine::state_manager::{StateManager, SystemState};
 use market_data::websocket::MexcStream;
+use market_data::scanner::UniverseScanner;
 use market_data::mexc_private::{MexcPrivateClient, AccountAsset, OpenPosition, try_build_from_env};
 use risk::manager::RiskManager;
+
+// ─── Phase 4 Commands ────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn set_active_analysis_symbol(symbol: String, symbol_tx: tauri::State<'_, tokio::sync::watch::Sender<String>>) -> Result<(), String> {
+    log::info!("[TAURI CMD] Changing active analysis symbol to {}", symbol);
+    symbol_tx.send(symbol).map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 // ─── TAURI STATE ────────────────────────────────────────────────────────────
 // These are wrapped in Arc for thread-safe sharing across Tauri commands
@@ -282,15 +293,22 @@ pub fn run() {
             record_setup_outcome,
             query_setup_outcomes,
             write_report_to_vault,
+            set_active_analysis_symbol,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
 
+            let (symbol_tx, symbol_rx) = tokio::sync::watch::channel("BTC_USDT".to_string());
+            handle.manage(symbol_tx);
+
             // Start MEXC futures WebSocket stream
-            // Symbol uses MEXC contract format with underscore: BTC_USDT, ETH_USDT, etc.
-            let mexc = MexcStream::new("BTC_USDT");
+            let mexc = MexcStream::new(symbol_rx);
             let sender = event_bus.sender();
-            mexc.start(sender, handle.clone());
+            mexc.start(sender.clone(), handle.clone());
+
+            // Phase 1: Start Universe Scanner
+            let scanner = UniverseScanner::new();
+            scanner.start(sender, handle.clone());
 
             // Tick listener — only job in co-pilot mode is keeping StateManager's
             // price field current for any future feature that needs the latest tick.

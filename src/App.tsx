@@ -13,6 +13,7 @@ import { PositionTracker } from './components/PositionTracker';
 import { LeverageSelector } from './components/LeverageSelector';
 import { DevTools } from './components/DevTools';
 import { MarketStateBadge } from './components/MarketStateBadge';
+import { OpportunityScannerPanel } from './components/OpportunityScannerPanel';
 import { useMexcAccount } from './hooks/useMexcAccount';
 import { useRegimeDetection } from './hooks/useRegimeDetection';
 import './App.css';
@@ -23,7 +24,7 @@ import { RegimeEngine } from './analysis/regime-engine';
 import { ScalpEngine } from './analysis/scalp-engine';
 import { LiquidityTargetEngine } from './analysis/liquidity-target';
 import { LiquidityEngine } from './analysis/liquidity';
-import { useNexusStore } from './store';
+import { useNexusStore, useScannerStore, type UniverseTicker } from './store';
 
 /**
  * Nexus V2 Co-Pilot — Leverage-Adaptive Decision Interface.
@@ -46,7 +47,7 @@ import { useNexusStore } from './store';
  */
 function App() {
     const [livePrice, setLivePrice] = useState<number>(0);
-    const [symbol] = useState('BTC_USDT');
+    const symbol = useScannerStore(s => s.activeSymbol);
     const [timeframe, setTimeframe] = useState('1m');
 
     const setPendingSetup = useNexusStore(s => s.setPendingSetup);
@@ -78,10 +79,18 @@ function App() {
                 }
             });
 
-            return unlistenTick;
+            // Phase 1: Universe Scanner Listener
+            const unlistenScanner = await listen<UniverseTicker[]>('universe-scan-update', (event) => {
+                useScannerStore.getState().setUniverse(event.payload);
+            });
+
+            return () => {
+                unlistenTick();
+                unlistenScanner();
+            };
         }
 
-        const unlistenPromise = start();
+        const cleanupTauriPromise = start();
 
         // Subscribe to SETUP_DETECTED on internal EventBus (emitted by Maestro)
         const handleSetup = (natural: NaturalSetup) => {
@@ -195,7 +204,7 @@ function App() {
 
         return () => {
             if (cleanup) cleanup();
-            unlistenPromise.then(u => u());
+            cleanupTauriPromise.then(u => u());
             EventBus.off?.('SETUP_DETECTED', handleSetup);
             EventBus.off?.('SCALP_SETUP', handleScalpUpdate);
             EventBus.off?.('ANALYSIS_SIGNAL', handleAnalysisSync);
@@ -249,6 +258,11 @@ function App() {
 
             {/* Decision Interface Grid */}
             <main className="decision-grid">
+                {/* Scanner Sidebar */}
+                <section className="grid-scanner">
+                    <OpportunityScannerPanel />
+                </section>
+
                 {/* ROW 1: Chart + Checklist + Controls Column */}
                 <section className="grid-chart panel">
                     <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -266,7 +280,7 @@ function App() {
                         </div>
                     </div>
                     <div className="panel-content" style={{ padding: 0 }}>
-                        <ChartPanel timeframe={timeframe} />
+                        <ChartPanel timeframe={timeframe} symbol={symbol} />
                     </div>
                 </section>
 

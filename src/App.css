@@ -149,28 +149,30 @@ body {
 
 /* ═══ Decision Grid ═══ 
  *
- * 3 columns × 3 rows:
- *   col 1: chart (spans rows 1-2), signals (row 3)
- *   col 2: checklist (row 1), setup card (row 2), position (row 3)
- *   col 3: controls+meters (row 1), market context (row 2), feedback (row 3)
+ * 4 columns × 3 rows:
+ *   col 1: scanner (spans all rows)
+ *   col 2: chart (spans rows 1-2), signals (row 3)
+ *   col 3: checklist (row 1), setup card (row 2), position (row 3)
+ *   col 4: controls+meters (row 1), market context (row 2), feedback (row 3)
  */
 .decision-grid {
   display: grid;
-  grid-template-columns: 2.5fr 1.1fr 1fr;
+  grid-template-columns: 1fr 2fr 1.1fr 1fr;
   grid-template-rows: 1.2fr 1fr 0.8fr;
   gap: 8px;
   flex: 1;
   min-height: 0;
 }
 
-.grid-chart     { grid-column: 1; grid-row: 1 / 3; }
-.grid-checklist { grid-column: 2; grid-row: 1; }
-.grid-controls  { grid-column: 3; grid-row: 1; }
-.grid-setup     { grid-column: 2; grid-row: 2; }
-.grid-context   { grid-column: 3; grid-row: 2; }
-.grid-signals   { grid-column: 1; grid-row: 3; }
-.grid-position  { grid-column: 2; grid-row: 3; }
-.grid-feedback  { grid-column: 3; grid-row: 3; }
+.grid-scanner   { grid-column: 1; grid-row: 1 / 4; }
+.grid-chart     { grid-column: 2; grid-row: 1 / 3; }
+.grid-checklist { grid-column: 3; grid-row: 1; }
+.grid-controls  { grid-column: 4; grid-row: 1; }
+.grid-setup     { grid-column: 3; grid-row: 2; }
+.grid-context   { grid-column: 4; grid-row: 2; }
+.grid-signals   { grid-column: 2; grid-row: 3; }
+.grid-position  { grid-column: 3; grid-row: 3; }
+.grid-feedback  { grid-column: 4; grid-row: 3; }
 
 /* ═══ Timeframe Buttons ═══ */
 .tf-btn {

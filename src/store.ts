@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
 import type { NaturalSetup, SetupResult } from './analysis/leverage-risk';
 import type { Regime, RegimeResult } from './analysis/regime-engine';
 import { ScalpEngine } from './analysis/scalp-engine';
@@ -241,11 +242,51 @@ export const useNexusStore = create<NexusState>((set, get) => ({
         regimeUpdatedAt: Date.now(),
     }),
 
-    // FIX C1: Sync bridge — pushes ScalpEngine state into store
     syncEngineState: (r) => set({
         operatingMode: (r.operatingMode as 'swing_scalp' | 'hybrid' | 'micro_scalp') || 'swing_scalp',
         velocityState: r.velocityState || { tradesPerMinute: 0, sizeReduction: 1.0 },
         netPnlSession: r.netPnlSession ?? 0,
         totalFeesSession: r.totalFeesSession ?? 0,
     }),
+}));
+
+// ─── Phase 1: Universe Scanner Store ───────────────────────────────────────
+
+export interface UniverseTicker {
+    symbol: string;
+    last_price: number;
+    volume_24h: number;
+    amount_24h: number;
+    rise_fall_rate: number;
+    high_24h: number;
+    low_24h: number;
+    volatility: number;
+    regime: string;
+    opportunity_score: number;
+    timestamp: number;
+}
+
+interface ScannerState {
+    universe: UniverseTicker[];
+    topCandidates: UniverseTicker[];
+    activeSymbol: string;
+    lastUpdateMs: number;
+    setUniverse: (tickers: UniverseTicker[]) => void;
+    setActiveSymbol: (symbol: string) => void;
+}
+
+export const useScannerStore = create<ScannerState>((set) => ({
+    universe: [],
+    topCandidates: [],
+    activeSymbol: 'BTC_USDT',
+    lastUpdateMs: 0,
+    setUniverse: (tickers) => set({ 
+        universe: tickers, 
+        topCandidates: tickers.slice(0, 10), // Keep top 10 for UI
+        lastUpdateMs: Date.now() 
+    }),
+    setActiveSymbol: (symbol) => {
+        set({ activeSymbol: symbol });
+        invoke('set_active_analysis_symbol', { symbol }).catch(console.error);
+    },
 }));

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { EventBus } from '../analysis/event-bus';
 import { useNexusStore } from '../store';
-import type { NaturalSetup } from '../analysis/leverage-risk';
-import type { Regime } from '../analysis/regime-engine';
+import { LeverageAdjustedRiskEngine, DEFAULT_CONFIG, type NaturalSetup } from '../analysis/leverage-risk';
+import { RegimeEngine, type Regime } from '../analysis/regime-engine';
 import { generateAndSaveWeeklyReport } from '../analysis/report';
 
 /**
@@ -138,13 +138,10 @@ export const DevTools: React.FC = () => {
             const s = useNexusStore.getState();
 
             // v5.2e: Direct pipeline execution (no EventBus dependency)
-            const { LeverageAdjustedRiskEngine, DEFAULT_CONFIG } = require('../analysis/leverage-risk');
-            const { RegimeEngine } = require('../analysis/regime-engine');
-
             // Regime gate
             const hint = RegimeEngine.behaviorHint(s.currentRegime);
             if (hint.block) {
-                const blockedEntry = {
+                const blockedEntry: any = {
                     natural,
                     adjusted: {
                         accepted: false,

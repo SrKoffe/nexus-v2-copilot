@@ -11,6 +11,22 @@ pub struct Tick {
     pub timestamp: u64,
 }
 
+/// Lightweight ticker data from MEXC sub.tickers for Universe Scanner
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniverseTicker {
+    pub symbol: String,
+    pub last_price: f64,
+    pub volume_24h: f64,
+    pub amount_24h: f64,
+    pub rise_fall_rate: f64, // 24h % change
+    pub high_24h: f64,
+    pub low_24h: f64,
+    pub volatility: f64,
+    pub regime: String, // "TREND_UP", "TREND_DOWN", "RANGE", "CHAOTIC"
+    pub opportunity_score: f64,
+    pub timestamp: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderResult {
     pub success: bool,
@@ -50,6 +66,7 @@ pub struct TradeOutcome {
 #[derive(Debug, Clone)]
 pub enum SystemEvent {
     MarketTick(Tick),
+    UniverseScanUpdate(Vec<UniverseTicker>),
     ExecuteTrade(TradeSignal),
     OrderFilled(OrderResult),
     OrderRejected(OrderResult),
