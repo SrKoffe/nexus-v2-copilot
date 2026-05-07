@@ -180,6 +180,24 @@ function buildChecklist(): ChecklistState {
     }
     items.push({ label: 'OBI Divergence', status: obiStatus, explanation: obiExplain });
 
+    // 8. Liquidity Target (v5.2e)
+    const liqUsed = adj.tp1LiquidityUsed ?? false;
+    const liqSource = adj.tp1LiquiditySource ?? null;
+    const liqConf = adj.tp1LiquidityConfidence ?? 0;
+    if (liqUsed && liqSource) {
+        items.push({
+            label: 'Liquidity Target',
+            status: liqConf >= 0.5 ? 'pass' : 'warning',
+            explanation: `TP1 backed by ${liqSource} (${(liqConf * 100).toFixed(0)}% confidence)`,
+        });
+    } else {
+        items.push({
+            label: 'Liquidity Target',
+            status: 'warning',
+            explanation: 'No structural liquidity node — TP from margin-PnL model',
+        });
+    }
+
     // Compute decision
     const fails = items.filter(i => i.status === 'fail').length;
     const warnings = items.filter(i => i.status === 'warning').length;

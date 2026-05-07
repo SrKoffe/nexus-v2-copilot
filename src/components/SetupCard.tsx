@@ -73,10 +73,25 @@ export const SetupCard: React.FC = () => {
                     <div className="mono text-md" style={{ color: '#fff' }}>${setup.entryPrice.toFixed(1)}</div>
                 </div>
                 <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '4px' }}>
-                    <div className="text-secondary mono text-xs">TARGET (TP1 50%)</div>
+                    <div className="text-secondary mono text-xs" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        TARGET (TP1 50%)
+                        {setup.tp1LiquidityUsed && (
+                            <span style={{
+                                background: 'rgba(0, 225, 255, 0.15)',
+                                color: '#00e1ff',
+                                padding: '1px 5px',
+                                borderRadius: '3px',
+                                fontSize: '8px',
+                                fontWeight: 'bold',
+                                letterSpacing: '0.3px',
+                            }}>
+                                📍 {setup.tp1LiquiditySource}
+                            </span>
+                        )}
+                    </div>
                     <div className="mono text-md" style={{ color: '#00e1ff' }}>${setup.takeProfit1.toFixed(1)}</div>
                     <div className="mono text-xs" style={{ color: '#00e1ff' }}>
-                        +{setup.takeProfit1Pct.toFixed(3)}% · +{setup.takeProfit1MarginNet}% margem net
+                        +{setup.takeProfit1Pct.toFixed(3)}% · +{typeof setup.takeProfit1MarginNet === 'number' ? setup.takeProfit1MarginNet.toFixed(1) : setup.takeProfit1MarginNet}% margem net
                     </div>
                 </div>
                 <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '4px' }}>
@@ -136,6 +151,48 @@ export const SetupCard: React.FC = () => {
                     fontFamily: 'JetBrains Mono, monospace',
                 }}>
                     {setup.evExplanation}
+                </div>
+            )}
+
+            {/* Liquidity Target reasoning (v5.2e) */}
+            {setup.tp1LiquidityUsed && setup.tp1LiquidityLabel && (
+                <div style={{
+                    background: 'rgba(0, 225, 255, 0.06)',
+                    border: '1px solid rgba(0, 225, 255, 0.20)',
+                    borderRadius: '4px',
+                    padding: '6px 10px',
+                    fontSize: '10px',
+                    color: '#99ddee',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                }}>
+                    <span style={{ fontSize: '12px' }}>📍</span>
+                    <span>
+                        Liquidity target: {setup.tp1LiquidityLabel}
+                        {setup.tp1LiquidityConfidence > 0 && (
+                            <span style={{
+                                color: setup.tp1LiquidityConfidence >= 0.6 ? '#00ff88' : '#ffaa00',
+                                marginLeft: '6px',
+                            }}>
+                                ({(setup.tp1LiquidityConfidence * 100).toFixed(0)}% confidence)
+                            </span>
+                        )}
+                    </span>
+                </div>
+            )}
+            {!setup.tp1LiquidityUsed && (
+                <div style={{
+                    background: 'rgba(255, 170, 0, 0.04)',
+                    border: '1px solid rgba(255, 170, 0, 0.10)',
+                    borderRadius: '4px',
+                    padding: '5px 10px',
+                    fontSize: '9px',
+                    color: '#998866',
+                    fontFamily: 'JetBrains Mono, monospace',
+                }}>
+                    TP from margin-PnL model (no liquidity node met dual-gate)
                 </div>
             )}
 

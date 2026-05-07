@@ -47,6 +47,14 @@ export interface NaturalSetup {
     liquidityStrength?: number;
     /** Regime atual — usado pelo ProbabilityModel pra alignment bonus */
     regime?: Regime;
+
+    // ─── v5.2e: Liquidity target hints (set by App.tsx from LiquidityTargetEngine) ───
+    /** Override naturalTakeProfit with liquidity-derived target */
+    liquidityTargetPrice?: number;
+    /** Source of the liquidity target (EQH, POC, etc.) */
+    liquidityTargetSource?: string;
+    /** Confidence of the liquidity target 0..1 */
+    liquidityTargetConfidence?: number;
 }
 
 export interface AdjustedSetup {
@@ -98,6 +106,16 @@ export interface AdjustedSetup {
     probabilityCalibration: 'heuristic' | 'fitted';
     /** Human-readable EV reasoning */
     evExplanation: string;
+
+    // ─── Liquidity Target (v5.2e) ───
+    /** Source of TP1 if liquidity-derived (e.g. "EQH", "POC"), null if margin-PnL */
+    tp1LiquiditySource: string | null;
+    /** True if liquidity target overrode the margin-PnL target */
+    tp1LiquidityUsed: boolean;
+    /** Confidence of the liquidity target 0..1 (0 if not used) */
+    tp1LiquidityConfidence: number;
+    /** Human-readable liquidity target label */
+    tp1LiquidityLabel: string | null;
 
     leverage: number;
 
@@ -295,8 +313,32 @@ export const LeverageAdjustedRiskEngine = {
             };
         }
 
-        const tp1PricePct = tp1GrossMargin / leverage;
-        const tp2PricePct = tp2GrossMargin / leverage;
+        let tp1PricePct = tp1GrossMargin / leverage;
+        let tp2PricePct = tp2GrossMargin / leverage;
+
+        // ─── 5.5. Liquidity Target dual-gate (v5.2e) ───
+        // If a liquidity-derived target was provided, check if it exceeds the
+        // margin-PnL floor. If yes, use it. If no, keep the mechanical target.
+        let tp1LiqUsed = false;
+        let tp1LiqSource: string | null = null;
+        let tp1LiqConfidence = 0;
+        let tp1LiqLabel: string | null = null;
+
+        if (setup.liquidityTargetPrice && setup.liquidityTargetPrice > 0) {
+            const liqTpPct = pctDistance(setup.entryPrice, setup.liquidityTargetPrice);
+            const liqTpGrossMargin = liqTpPct * leverage;
+            const liqTpNetMargin = liqTpGrossMargin - feesMarginPct;
+
+            // Dual-gate: liquidity TP must cover the margin-PnL floor
+            if (liqTpNetMargin >= effectiveTp1Net) {
+                tp1PricePct = liqTpPct;
+                tp1LiqUsed = true;
+                tp1LiqSource = setup.liquidityTargetSource || 'LIQ';
+                tp1LiqConfidence = setup.liquidityTargetConfidence || 0;
+                tp1LiqLabel = `${tp1LiqSource} @ ${setup.liquidityTargetPrice.toFixed(1)} (${(tp1LiqConfidence * 100).toFixed(0)}%)`;
+            }
+            // else: liquidity node too close to cover fees — fall back to margin-PnL target
+        }
 
         // ─── 6. Estrutura check pro TP — só se a confidence é alta o bastante ───
         // Em scalp HL, TP é micro-movimento então quase sempre cabe na estrutura.
@@ -313,7 +355,10 @@ export const LeverageAdjustedRiskEngine = {
 
         // FIX H2: Use EFFECTIVE (capped) TP targets for break-even calculation,
         // not the raw config values which are uncapped and too optimistic at high leverage.
-        const expectedWin = 0.5 * effectiveTp1Net + 0.5 * effectiveTp2Net;
+        // Recalculate TP1 gross after potential liquidity override
+        const effectiveTp1Gross = tp1PricePct * leverage;
+        const effectiveTp1NetFinal = tp1LiqUsed ? (effectiveTp1Gross - feesMarginPct) : effectiveTp1Net;
+        const expectedWin = 0.5 * effectiveTp1NetFinal + 0.5 * effectiveTp2Net;
         const expectedLoss = slMarginPct + feesMarginPct;
         const breakEvenWinRate = expectedLoss / (expectedWin + expectedLoss);
 
@@ -417,8 +462,8 @@ export const LeverageAdjustedRiskEngine = {
             stopLossMarginPct: slMarginPct,
             takeProfit1,
             takeProfit1Pct: tp1PricePct,
-            takeProfit1MarginGross: tp1GrossMargin,
-            takeProfit1MarginNet: config.tp1TargetNetMarginPct,
+            takeProfit1MarginGross: tp1LiqUsed ? (tp1PricePct * leverage) : tp1GrossMargin,
+            takeProfit1MarginNet: tp1LiqUsed ? effectiveTp1NetFinal : config.tp1TargetNetMarginPct,
             takeProfit2,
             takeProfit2Pct: tp2PricePct,
             takeProfit2MarginGross: tp2GrossMargin,
@@ -426,6 +471,10 @@ export const LeverageAdjustedRiskEngine = {
             feesMarginPct,
             slippageMarginPct,
             breakEvenWinRate,
+            tp1LiquiditySource: tp1LiqSource,
+            tp1LiquidityUsed: tp1LiqUsed,
+            tp1LiquidityConfidence: tp1LiqConfidence,
+            tp1LiquidityLabel: tp1LiqLabel,
             probabilityHit: probResult.probability,
             expectedValueMarginPct: ev.ev,
             evCostRatio: ev.ratio,

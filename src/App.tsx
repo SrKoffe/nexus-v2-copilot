@@ -21,6 +21,8 @@ import { EventBus } from './analysis/event-bus';
 import { LeverageAdjustedRiskEngine, DEFAULT_CONFIG, type NaturalSetup } from './analysis/leverage-risk';
 import { RegimeEngine } from './analysis/regime-engine';
 import { ScalpEngine } from './analysis/scalp-engine';
+import { LiquidityTargetEngine } from './analysis/liquidity-target';
+import { LiquidityEngine } from './analysis/liquidity';
 import { useNexusStore } from './store';
 
 /**
@@ -119,6 +121,24 @@ function App() {
                 ...natural,
                 regime: natural.regime ?? s.currentRegime,
             };
+
+            // v5.2e: Query LiquidityTargetEngine for structural targets.
+            // ATR from LiquidityEngine's cached state (computed during analysis).
+            const atr = enriched.atr || LiquidityEngine?._state?.atr || 0;
+            if (atr > 0 && enriched.entryPrice > 0 && enriched.direction !== 'neutral') {
+                const liqResult = LiquidityTargetEngine.findTargets(
+                    enriched.entryPrice,
+                    enriched.direction as 'long' | 'short',
+                    atr
+                );
+                if (!liqResult.fallbackUsed && liqResult.primaryTarget) {
+                    enriched.liquidityTargetPrice = liqResult.primaryTarget.price;
+                    enriched.liquidityTargetSource = liqResult.primaryTarget.source;
+                    enriched.liquidityTargetConfidence = liqResult.primaryTarget.confidence;
+                    enriched.liquidityStrength = LiquidityTargetEngine.getLiquidityStrength(liqResult);
+                }
+            }
+
             const adjusted = LeverageAdjustedRiskEngine.adjust(enriched, s.leverage, s.balanceUsd, config);
 
             const entry = {

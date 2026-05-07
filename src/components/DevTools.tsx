@@ -17,7 +17,7 @@ import { generateAndSaveWeeklyReport } from '../analysis/report';
  *      → user can mark as taken → PositionTracker → outcome buttons
  */
 
-type Scenario = 'long_clean' | 'short_clean' | 'long_borderline' | 'tight_sl' | 'low_rr' | 'low_conf';
+type Scenario = 'long_clean' | 'short_clean' | 'long_borderline' | 'tight_sl' | 'low_rr' | 'low_conf' | 'long_liq_target' | 'short_no_liq';
 
 const SCENARIOS: Record<Scenario, { label: string; build: (price: number) => NaturalSetup }> = {
     long_clean: {
@@ -90,6 +90,35 @@ const SCENARIOS: Record<Scenario, { label: string; build: (price: number) => Nat
             naturalTakeProfit: price * (1 + 0.030),
             confidence: 0.40,  // < 0.55 mínimo
             reason: 'TEST: weak signal',
+        }),
+    },
+    long_liq_target: {
+        label: '📍 LONG + Liquidity Target (EQH, conf 0.80)',
+        build: (price) => ({
+            symbol: 'BTC_USDT',
+            direction: 'long',
+            entryPrice: price,
+            naturalStopLoss: price * (1 - 0.012),
+            naturalTakeProfit: price * (1 + 0.035),
+            confidence: 0.75,
+            reason: 'TEST: Liquidity sweep + EQH target above',
+            liquidityStrength: 0.80,
+            liquidityTargetPrice: price * (1 + 0.025),
+            liquidityTargetSource: 'EQH',
+            liquidityTargetConfidence: 0.80,
+        }),
+    },
+    short_no_liq: {
+        label: '📍 SHORT no liq node (margin-PnL fallback)',
+        build: (price) => ({
+            symbol: 'BTC_USDT',
+            direction: 'short',
+            entryPrice: price,
+            naturalStopLoss: price * (1 + 0.012),
+            naturalTakeProfit: price * (1 - 0.030),
+            confidence: 0.72,
+            reason: 'TEST: BOS + no liquidity pool below',
+            // No liquidity hints — should use margin-PnL model
         }),
     },
 };
