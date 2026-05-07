@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
 import type { NaturalSetup, SetupResult } from './analysis/leverage-risk';
 import type { Regime, RegimeResult } from './analysis/regime-engine';
@@ -269,24 +270,44 @@ export interface UniverseTicker {
 interface ScannerState {
     universe: UniverseTicker[];
     topCandidates: UniverseTicker[];
+    favorites: string[];
     activeSymbol: string;
     lastUpdateMs: number;
     setUniverse: (tickers: UniverseTicker[]) => void;
     setActiveSymbol: (symbol: string) => void;
+    toggleFavorite: (symbol: string) => void;
 }
 
-export const useScannerStore = create<ScannerState>((set) => ({
-    universe: [],
-    topCandidates: [],
-    activeSymbol: 'BTC_USDT',
-    lastUpdateMs: 0,
-    setUniverse: (tickers) => set({ 
-        universe: tickers, 
-        topCandidates: tickers.slice(0, 10), // Keep top 10 for UI
-        lastUpdateMs: Date.now() 
-    }),
-    setActiveSymbol: (symbol) => {
-        set({ activeSymbol: symbol });
-        invoke('set_active_analysis_symbol', { symbol }).catch(console.error);
-    },
-}));
+export const useScannerStore = create<ScannerState>()(
+    persist(
+        (set, get) => ({
+            universe: [],
+            topCandidates: [],
+            favorites: [],
+            activeSymbol: 'BTC_USDT',
+            lastUpdateMs: 0,
+            setUniverse: (tickers) => set({ 
+                universe: tickers, 
+                topCandidates: tickers.slice(0, 10), // Keep top 10 for UI
+                lastUpdateMs: Date.now() 
+            }),
+            setActiveSymbol: (symbol) => {
+                set({ activeSymbol: symbol });
+                invoke('set_active_analysis_symbol', { symbol }).catch(console.error);
+            },
+            toggleFavorite: (symbol) => {
+                const { favorites } = get();
+                if (favorites.includes(symbol)) {
+                    set({ favorites: favorites.filter(s => s !== symbol) });
+                } else {
+                    set({ favorites: [...favorites, symbol] });
+                }
+            },
+        }),
+        {
+            name: 'nexus-scanner-storage', // key in localStorage
+            storage: createJSONStorage(() => localStorage),
+            partialize: (state) => ({ favorites: state.favorites }), // only save favorites
+        }
+    )
+);
