@@ -130,13 +130,68 @@ export const DevTools: React.FC = () => {
     const setBalance = useNexusStore(s => s.setBalance);
 
     const inject = (scenario: Scenario) => {
-        // Use last live price if available; fallback to 65000
-        const lastPrice =
-            (window as any).__lastLivePrice ??
-            65000;
-        const natural = SCENARIOS[scenario].build(lastPrice);
-        EventBus.emit('SETUP_DETECTED', natural);
-        console.log('[DevTools] Injected setup:', scenario, natural);
+        try {
+            const lastPrice =
+                (window as any).__lastLivePrice ?? 65000;
+            const natural = SCENARIOS[scenario].build(lastPrice);
+
+            const s = useNexusStore.getState();
+
+            // v5.2e: Direct pipeline execution (no EventBus dependency)
+            const { LeverageAdjustedRiskEngine, DEFAULT_CONFIG } = require('../analysis/leverage-risk');
+            const { RegimeEngine } = require('../analysis/regime-engine');
+
+            // Regime gate
+            const hint = RegimeEngine.behaviorHint(s.currentRegime);
+            if (hint.block) {
+                const blockedEntry = {
+                    natural,
+                    adjusted: {
+                        accepted: false,
+                        code: 'EV_NOT_POSITIVE',
+                        reason: `Regime ${s.currentRegime.toUpperCase()} blocks setups`,
+                    },
+                    detectedAt: Date.now(),
+                    outcome: null,
+                    pnlPct: null,
+                };
+                s.setPendingSetup(blockedEntry);
+                s.addToHistory(blockedEntry);
+                console.log('[DevTools] Injected (BLOCKED by regime):', scenario);
+                return;
+            }
+
+            const config = {
+                ...DEFAULT_CONFIG,
+                tp1TargetNetMarginPct: s.tp1NetTarget,
+                tp2TargetNetMarginPct: s.tp2NetTarget,
+                takerFeePct: s.takerFeePct,
+            };
+
+            const enriched = {
+                ...natural,
+                regime: natural.regime ?? s.currentRegime,
+            };
+
+            const adjusted = LeverageAdjustedRiskEngine.adjust(enriched, s.leverage, s.balanceUsd, config);
+
+            const entry = {
+                natural: enriched,
+                adjusted,
+                detectedAt: Date.now(),
+                outcome: null,
+                pnlPct: null,
+            };
+
+            s.setPendingSetup(entry);
+            s.addToHistory(entry);
+
+            // Also emit on EventBus for any other listeners
+            EventBus.emit('SETUP_DETECTED', natural);
+            console.log('[DevTools] ✅ Injected setup:', scenario, adjusted.accepted ? 'ACCEPTED' : `REJECTED (${adjusted.code})`);
+        } catch (err) {
+            console.error('[DevTools] ❌ Injection failed:', err);
+        }
     };
 
     if (!open) {
@@ -171,7 +226,9 @@ export const DevTools: React.FC = () => {
                 position: 'fixed',
                 bottom: '12px',
                 right: '12px',
-                width: '300px',
+                width: '320px',
+                maxHeight: 'calc(100vh - 24px)',
+                overflowY: 'auto',
                 background: 'rgba(15, 18, 28, 0.97)',
                 border: '1px solid rgba(255, 170, 0, 0.4)',
                 borderRadius: '8px',
