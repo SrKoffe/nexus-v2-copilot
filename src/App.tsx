@@ -12,8 +12,9 @@ import { LiveFeed } from './components/LiveFeed';
 import { PositionTracker } from './components/PositionTracker';
 import { LeverageSelector } from './components/LeverageSelector';
 import { DevTools } from './components/DevTools';
-import { HUD } from './components/HUD';
+import { MarketStateBadge } from './components/MarketStateBadge';
 import { useMexcAccount } from './hooks/useMexcAccount';
+import { useRegimeDetection } from './hooks/useRegimeDetection';
 import './App.css';
 import { initAnalysisPipeline } from './analysis';
 import { EventBus } from './analysis/event-bus';
@@ -54,6 +55,9 @@ function App() {
 
     // Poll MEXC private API for real-time balance (no-op if keys not configured)
     useMexcAccount();
+
+    // v5.1 — Run RegimeEngine on every candle close, push result into store
+    useRegimeDetection();
 
     useEffect(() => {
         let cleanup: (() => void) | undefined;
@@ -166,6 +170,9 @@ function App() {
                         ${livePrice > 0 ? livePrice.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '---.-'}
                     </span>
                 </div>
+
+                {/* v5.1: Level-0 regime cue, prominent next to ticker */}
+                <MarketStateBadge />
 
                 <LeverageSelector />
 

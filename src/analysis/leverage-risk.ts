@@ -162,33 +162,12 @@ function targetSlPctForLeverage(leverage: number): number {
     return 0.15;
 }
 
-/**
- * F9: minConfidence escala INVERSO à leverage.
- *
- * Lógica do scalper: em alta leverage, edge estatístico vem do VOLUME de
- * trades pequenos. Cada trade individual pode ter conf baixa, mas com SL
- * apertado e TP curto, payoff esperado em N trades > erro de cada um.
- *
- * Em low leverage, queremos só setups fortes — você fica mais tempo no
- * trade, então cada decisão pesa mais.
- *
- *   x10  → 0.55 (high bar, raros mas fortes)
- *   x25  → 0.55
- *   x50  → 0.50
- *   x100 → 0.45 (frequência média, conf média)
- *   x200 → 0.40
- *   x500 → 0.35 (high frequency, conf baixa OK; engine de risk + survival ainda gating)
- */
-function minConfidenceForLeverage(leverage: number, baseMin: number): number {
-    let adjusted: number;
-    if (leverage <= 25) adjusted = baseMin;
-    else if (leverage <= 50) adjusted = baseMin - 0.05;
-    else if (leverage <= 100) adjusted = baseMin - 0.10;
-    else if (leverage <= 200) adjusted = baseMin - 0.15;
-    else adjusted = baseMin - 0.20;
-    // Hard floor — never accept conf < 0.30 regardless of leverage
-    return Math.max(0.30, adjusted);
-}
+// NOTE: F9 (linear minConfidence-by-leverage) was reverted in favor of the
+// v4.0 Operating Modes system (`swing_scalp` / `hybrid` / `micro_scalp`)
+// implemented in ScalpEngine. Modes adapt threshold + max-trades-per-minute +
+// position size simultaneously, which is more nuanced than scaling confidence
+// alone. See ScalpingControlPanel.tsx and SetupChecklist.tsx for the user-facing
+// surfacing of mode-driven thresholds.
 
 // ─── Engine ────────────────────────────────────────────────────────────────
 
@@ -207,14 +186,14 @@ export const LeverageAdjustedRiskEngine = {
         if (leverage <= 0 || leverage > 500) {
             return { accepted: false, code: 'INVALID_INPUT', reason: `Invalid leverage: ${leverage}` };
         }
-        // F9: min confidence scales inverse to leverage — high leverage = more frequent
-        // signals tolerated, edge comes from volume not magnitude.
-        const effectiveMinConf = minConfidenceForLeverage(leverage, config.minConfidence);
-        if (setup.confidence < effectiveMinConf) {
+        // Min confidence gate. Mode-aware threshold lives in ScalpEngine/Maestro;
+        // this is just the floor. If a setup got here, the upstream pipeline
+        // already passed its mode-specific threshold.
+        if (setup.confidence < config.minConfidence) {
             return {
                 accepted: false,
                 code: 'CONFIDENCE_TOO_LOW',
-                reason: `Confidence ${(setup.confidence * 100).toFixed(0)}% < ${(effectiveMinConf * 100).toFixed(0)}% (min for ${leverage}x)`,
+                reason: `Confidence ${(setup.confidence * 100).toFixed(0)}% < ${(config.minConfidence * 100).toFixed(0)}%`,
             };
         }
 
@@ -378,25 +357,9 @@ export const LeverageAdjustedRiskEngine = {
     /** Util pro UI: SL% recomendado por leverage. */
     targetSlPctForLeverage,
 
-    /** Util pro UI: minConfidence efetivo pra essa leverage. */
-    minConfidenceForLeverage,
-
     /** Util pro UI: fees totais em % margem. */
     feesMarginPctFor(leverage: number, takerFeePct: number = DEFAULT_CONFIG.takerFeePct): number {
         return takerFeePct * 2 * leverage;
-    },
-
-    /**
-     * F9: Maestro execution threshold baseado em leverage.
-     * Mais leverage → threshold mais baixo → mais setups detectados.
-     * Combina com regime/vol multipliers que já existem no Maestro.
-     */
-    executionThresholdForLeverage(leverage: number): number {
-        if (leverage <= 25) return 0.65;
-        if (leverage <= 50) return 0.55;
-        if (leverage <= 100) return 0.45;
-        if (leverage <= 200) return 0.40;
-        return 0.35;
     },
 };
 

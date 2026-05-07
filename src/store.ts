@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { NaturalSetup, SetupResult } from './analysis/leverage-risk';
+import type { Regime, RegimeResult } from './analysis/regime-engine';
 import { ScalpEngine } from './analysis/scalp-engine';
 
 /**
@@ -85,12 +86,20 @@ interface NexusState {
     totalFeesSession: number;
     setSessionPnl: (net: number, fees: number) => void;
 
-    // ─── 4-Level Pipeline State (HUD Visualizer) ───
-    pipelineStage: 0 | 1 | 2 | 3 | 4;
+    // ─── 5-Level Pipeline State (HUD Visualizer, v5.1) ───
+    /** Pipeline stage 0-5: 0=idle, 1=Regime, 2=Microstructure, 3=AMT, 4=EV/Target, 5=Execution */
+    pipelineStage: 0 | 1 | 2 | 3 | 4 | 5;
     pipelineDirection: 'long' | 'short' | null;
     pipelineStatus: 'idle' | 'evaluating' | 'passed' | 'rejected';
     pipelineReason: string | null;
-    setPipelineStage: (stage: 0 | 1 | 2 | 3 | 4, status?: 'idle' | 'evaluating' | 'passed' | 'rejected', direction?: 'long' | 'short' | null, reason?: string | null) => void;
+    setPipelineStage: (stage: 0 | 1 | 2 | 3 | 4 | 5, status?: 'idle' | 'evaluating' | 'passed' | 'rejected', direction?: 'long' | 'short' | null, reason?: string | null) => void;
+
+    // ─── Market Regime (v5.1 — Level 0 of pipeline) ───
+    currentRegime: Regime;
+    regimeConfidence: number;       // 0..1
+    regimeReasons: string[];
+    regimeUpdatedAt: number;        // ms timestamp of last evaluation
+    setRegime: (r: RegimeResult) => void;
 
     /**
      * FIX C1: Sync bridge — called after each ScalpEngine.handleEvent() return.
@@ -208,17 +217,29 @@ export const useNexusStore = create<NexusState>((set, get) => ({
     totalFeesSession: 0,
     setSessionPnl: (net, fees) => set({ netPnlSession: net, totalFeesSession: fees }),
 
-    // ─── 4-Level Pipeline State (HUD Visualizer) ───
+    // ─── 5-Level Pipeline State (HUD Visualizer, v5.1) ───
     pipelineStage: 0,
     pipelineDirection: null,
     pipelineStatus: 'idle',
     pipelineReason: null,
-    setPipelineStage: (stage, status, direction, reason) => set((s) => ({ 
-        pipelineStage: stage, 
+    setPipelineStage: (stage, status, direction, reason) => set((s) => ({
+        pipelineStage: stage,
         pipelineStatus: status !== undefined ? status : s.pipelineStatus,
         pipelineDirection: direction !== undefined ? direction : s.pipelineDirection,
         pipelineReason: reason !== undefined ? reason : s.pipelineReason
     })),
+
+    // ─── Market Regime (v5.1) ───
+    currentRegime: 'transition' as Regime,
+    regimeConfidence: 0,
+    regimeReasons: [],
+    regimeUpdatedAt: 0,
+    setRegime: (r) => set({
+        currentRegime: r.regime,
+        regimeConfidence: r.confidence,
+        regimeReasons: r.reasons,
+        regimeUpdatedAt: Date.now(),
+    }),
 
     // FIX C1: Sync bridge — pushes ScalpEngine state into store
     syncEngineState: (r) => set({

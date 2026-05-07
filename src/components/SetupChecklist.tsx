@@ -44,6 +44,8 @@ function buildChecklist(): ChecklistState {
     const mode = store.operatingMode || 'swing_scalp';
     const pending = store.pendingSetup;
     const velocity = store.velocityState;
+    const marketRegime = store.currentRegime;
+    const marketRegimeConf = store.regimeConfidence;
 
     if (!pending || !pending.adjusted.accepted) {
         return { direction: 'NONE', mode, confidence: 0, score: 0, items: [], decision: 'NO TRADE' };
@@ -55,6 +57,39 @@ function buildChecklist(): ChecklistState {
 
     // Build individual checks
     const items: CheckItem[] = [];
+
+    // 0. Regime check (v5.1 — Level 0 of pipeline)
+    if (marketRegime === 'chaotic') {
+        items.push({
+            label: 'Market Regime',
+            status: 'fail',
+            explanation: `CHAOTIC regime — block trade. Confidence ${(marketRegimeConf * 100).toFixed(0)}%.`,
+        });
+    } else if (marketRegime === 'trend_up' && direction === 'SHORT') {
+        items.push({
+            label: 'Market Regime',
+            status: 'warning',
+            explanation: `Going SHORT against TREND_UP — counter-trend, only with strong reversal signal`,
+        });
+    } else if (marketRegime === 'trend_down' && direction === 'LONG') {
+        items.push({
+            label: 'Market Regime',
+            status: 'warning',
+            explanation: `Going LONG against TREND_DOWN — counter-trend, requires strong reversal`,
+        });
+    } else if (marketRegime === 'transition') {
+        items.push({
+            label: 'Market Regime',
+            status: 'warning',
+            explanation: `TRANSITION — no clear regime yet, expect lower edge`,
+        });
+    } else {
+        items.push({
+            label: 'Market Regime',
+            status: 'pass',
+            explanation: `${marketRegime.replace('_', ' ').toUpperCase()} aligned with ${direction} (${(marketRegimeConf * 100).toFixed(0)}%)`,
+        });
+    }
 
     // 1. Signal triggered
     const fusionScore = adj.confidence * 100;
@@ -168,10 +203,12 @@ export const SetupChecklist: React.FC = () => {
         const refresh = () => setState(buildChecklist());
         EventBus.on('ANALYSIS_SIGNAL', refresh);
         EventBus.on('SCALP_SETUP', refresh);
+        EventBus.on('REGIME_DETECTED', refresh);   // v5.1: refresh on regime change
         const interval = setInterval(refresh, 2000);
         return () => {
             EventBus.off('ANALYSIS_SIGNAL', refresh);
             EventBus.off('SCALP_SETUP', refresh);
+            EventBus.off('REGIME_DETECTED', refresh);
             clearInterval(interval);
         };
     }, []);

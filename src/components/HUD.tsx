@@ -27,10 +27,11 @@ export const HUD: React.FC = () => {
     };
 
     const stages = [
-        { num: 1, label: 'L1: Gatekeeper' },
-        { num: 2, label: 'L2: AMT/Profile' },
-        { num: 3, label: 'L3: EV Profit Gate' },
-        { num: 4, label: 'L4: Execution' }
+        { num: 1, label: 'L0: Regime' },
+        { num: 2, label: 'L1: Microstructure' },
+        { num: 3, label: 'L2: AMT/Profile' },
+        { num: 4, label: 'L3: EV / Target' },
+        { num: 5, label: 'L4: Execution' }
     ];
 
     const dirColor = (pipelineDirection === 'long' || pipelineDirection === 'bullish') ? '#00e1ff' : (pipelineDirection === 'short' || pipelineDirection === 'bearish') ? '#ff3366' : '#8892b0';
