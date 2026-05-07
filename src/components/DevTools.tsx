@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { EventBus } from '../analysis/event-bus';
 import { useNexusStore } from '../store';
 import type { NaturalSetup } from '../analysis/leverage-risk';
+import type { Regime } from '../analysis/regime-engine';
 import { generateAndSaveWeeklyReport } from '../analysis/report';
 
 /**
@@ -124,8 +125,6 @@ const SCENARIOS: Record<Scenario, { label: string; build: (price: number) => Nat
 };
 
 export const DevTools: React.FC = () => {
-    if (!import.meta.env.DEV) return null;
-
     const [open, setOpen] = useState(false);
     const balance = useNexusStore(s => s.balanceUsd);
     const setBalance = useNexusStore(s => s.setBalance);
@@ -231,6 +230,8 @@ export const DevTools: React.FC = () => {
 
                 <ScalpConfigPanel />
 
+                <RegimeForcePanel />
+
                 <ReportPanel />
             </div>
 
@@ -238,6 +239,128 @@ export const DevTools: React.FC = () => {
                 Setups use last live price.<br />
                 TP/fee config aplicado em PRÓXIMOS setups injetados.
             </div>
+        </div>
+    );
+};
+
+// ─── Regime Force panel (v5.2e stress-testing) ─────────────────────────────
+
+const REGIMES: { key: Regime; label: string; color: string }[] = [
+    { key: 'trend_up', label: '↑ TREND UP', color: '#00ff88' },
+    { key: 'trend_down', label: '↓ TREND DOWN', color: '#ff3366' },
+    { key: 'range', label: '⇔ RANGE', color: '#ffb800' },
+    { key: 'chaotic', label: '⚡ CHAOTIC', color: '#ff5555' },
+    { key: 'transition', label: '◇ TRANSITION', color: '#8892b0' },
+];
+
+const RegimeForcePanel: React.FC = () => {
+    const currentRegime = useNexusStore(s => s.currentRegime);
+    const regimeConfidence = useNexusStore(s => s.regimeConfidence);
+    const setRegime = useNexusStore(s => s.setRegime);
+    const [forced, setForced] = useState<Regime | null>(null);
+
+    const forceRegime = (regime: Regime) => {
+        const result = {
+            regime,
+            confidence: 0.95,
+            reasons: [`DEV FORCE: ${regime.toUpperCase()}`],
+            factors: {
+                trendStrength: regime.includes('trend') ? 2.5 : 0.3,
+                directionalConsistency: regime === 'trend_up' ? 0.8 : regime === 'trend_down' ? 0.8 : 0.4,
+                priceConcentration: regime === 'range' ? 0.85 : 0.3,
+                volatilityRatio: regime === 'chaotic' ? 2.5 : 1.0,
+                emaDirection: regime === 'trend_up' ? 1 : regime === 'trend_down' ? -1 : 0,
+            },
+        };
+        setRegime(result);
+        setForced(regime);
+        EventBus.emit('REGIME_DETECTED', result);
+        console.log(`[DevTools] Regime forced: ${regime}`);
+    };
+
+    const resetRegime = () => {
+        setForced(null);
+        // Next RegimeEngine.evaluate() call will overwrite with real data
+        console.log('[DevTools] Regime force released — will auto-detect on next tick');
+    };
+
+    const currentColor = REGIMES.find(r => r.key === currentRegime)?.color || '#888';
+
+    return (
+        <div style={{
+            marginTop: '8px',
+            paddingTop: '8px',
+            borderTop: '1px dashed rgba(255,255,255,0.06)',
+        }}>
+            <div style={{ color: '#ff6688', fontSize: '9px', marginBottom: '6px', letterSpacing: '0.5px' }}>
+                REGIME OVERRIDE (stress test)
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                <span style={{ color: '#888', fontSize: '9px' }}>Current:</span>
+                <span style={{
+                    color: currentColor,
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    fontFamily: 'JetBrains Mono, monospace',
+                }}>
+                    {currentRegime.toUpperCase()}
+                    <span style={{ color: '#666', fontWeight: 'normal', marginLeft: '4px' }}>
+                        ({(regimeConfidence * 100).toFixed(0)}%)
+                    </span>
+                </span>
+                {forced && (
+                    <span style={{
+                        background: 'rgba(255,102,136,0.15)',
+                        color: '#ff6688',
+                        padding: '1px 4px',
+                        borderRadius: '3px',
+                        fontSize: '7px',
+                        fontWeight: 'bold',
+                    }}>FORCED</span>
+                )}
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginBottom: '4px' }}>
+                {REGIMES.map(r => (
+                    <button
+                        key={r.key}
+                        onClick={() => forceRegime(r.key)}
+                        style={{
+                            background: forced === r.key ? `${r.color}20` : 'rgba(255,255,255,0.03)',
+                            border: `1px solid ${forced === r.key ? r.color : 'rgba(255,255,255,0.08)'}`,
+                            color: forced === r.key ? r.color : '#aaa',
+                            padding: '3px 6px',
+                            borderRadius: '3px',
+                            cursor: 'pointer',
+                            fontSize: '8px',
+                            fontFamily: 'inherit',
+                            fontWeight: forced === r.key ? 'bold' : 'normal',
+                        }}
+                    >
+                        {r.label}
+                    </button>
+                ))}
+            </div>
+
+            {forced && (
+                <button
+                    onClick={resetRegime}
+                    style={{
+                        width: '100%',
+                        background: 'rgba(255,255,255,0.03)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        color: '#888',
+                        padding: '3px',
+                        borderRadius: '3px',
+                        cursor: 'pointer',
+                        fontSize: '8px',
+                        fontFamily: 'inherit',
+                    }}
+                >
+                    🔄 Reset to auto-detect
+                </button>
+            )}
         </div>
     );
 };
