@@ -312,8 +312,15 @@ pub fn run() {
 
             // Tick listener — only job in co-pilot mode is keeping StateManager's
             // price field current for any future feature that needs the latest tick.
-            // Auto SL/TP exit logic was removed in F5: in co-pilot mode the user
-            // executes (and exits) manually on MEXC, then marks the outcome here.
+            //
+            // Removed in v5.2-fix (zombie path): `sm.analyze(tick.price, &handle)`
+            // was reactivated by another agent and was hitting fapi.binance.com
+            // hardcoded with symbol BTCUSDT on EVERY tick. This caused:
+            //   - 100s of fetches/min to the wrong exchange
+            //   - Inconsistent data (Binance prices feeding MEXC pipeline)
+            //   - Symbol drift on multi-symbol switching
+            // Level-1 gatekeeper logic now lives in the React analysis pipeline
+            // which uses MEXC candles loaded via fetch_historical_candles.
             let sm = state_manager.clone();
             let mut rx = event_bus.subscribe();
             tauri::async_runtime::spawn(async move {
@@ -321,8 +328,6 @@ pub fn run() {
                     match rx.recv().await {
                         Ok(core::event_bus::SystemEvent::MarketTick(tick)) => {
                             sm.update_price(tick.price);
-                            // Level 1 Gatekeeper: Evaluate tick for microstructure activity
-                            let _ = sm.analyze(tick.price, &handle).await;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                             log::warn!("[StateUpdater] Skipped {} events", n);

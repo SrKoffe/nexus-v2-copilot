@@ -292,8 +292,35 @@ export const useScannerStore = create<ScannerState>()(
                 lastUpdateMs: Date.now() 
             }),
             setActiveSymbol: (symbol) => {
+                const previous = get().activeSymbol;
+                if (symbol === previous) return;
+
                 set({ activeSymbol: symbol });
-                invoke('set_active_analysis_symbol', { symbol }).catch(console.error);
+
+                // Full chain: Rust WS re-subscribe → frontend candle cache reset →
+                // refetch history → engines re-bootstrap.
+                (async () => {
+                    try {
+                        // 1. Rust backend re-subscribes the WebSocket
+                        await invoke('set_active_analysis_symbol', { symbol });
+
+                        // 2. Reset frontend candle cache + emit SYMBOL_CHANGED for engines
+                        const { candleManager } = await import('./analysis/candle-manager');
+                        candleManager.setSymbol(symbol);
+
+                        // 3. Re-fetch history with new symbol so engines have data immediately
+                        const history = await invoke<any[]>('fetch_historical_candles', {
+                            symbol,
+                            interval: 'Min1',
+                            limit: 200,
+                        });
+                        if (history && history.length > 0) {
+                            candleManager.setHistory(history);
+                        }
+                    } catch (e) {
+                        console.error('[setActiveSymbol] chain failed:', e);
+                    }
+                })();
             },
             toggleFavorite: (symbol) => {
                 const { favorites } = get();

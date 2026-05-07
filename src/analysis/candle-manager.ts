@@ -6,7 +6,26 @@ export class CandleManager {
         this.candles1m = [];
         this.candles5m = [];
         this.current1m = null;
-        this.symbol = 'BTCUSDT';
+        this.symbol = 'BTC_USDT';  // MEXC contract format (was Binance 'BTCUSDT')
+    }
+
+    /**
+     * Switch symbol — clears all in-memory candles and emits SYMBOL_CHANGED.
+     * Caller (App.tsx changeSymbol helper) is expected to re-fetch history
+     * via Tauri `fetch_historical_candles` and call setHistory() right after.
+     *
+     * Engines that cache state (RegimeEngine, MarketStateEngine, LiquidityEngine,
+     * VolumeProfile, ScalpEngine) should listen for SYMBOL_CHANGED and reset.
+     */
+    setSymbol(newSymbol) {
+        if (!newSymbol || newSymbol === this.symbol) return;
+        const prev = this.symbol;
+        this.symbol = newSymbol;
+        this.candles1m = [];
+        this.candles5m = [];
+        this.current1m = null;
+        console.log(`📊 [Candles] Symbol changed: ${prev} → ${newSymbol}. Cleared cache.`);
+        EventBus.emit('SYMBOL_CHANGED', { previous: prev, current: newSymbol });
     }
 
     addTick(tick) {
