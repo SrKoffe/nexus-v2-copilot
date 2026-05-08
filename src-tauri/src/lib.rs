@@ -51,13 +51,13 @@ struct AppState {
 /// Get a config value from SQLite
 #[tauri::command]
 async fn get_config(state: tauri::State<'_, AppState>, key: String) -> Result<Option<String>, String> {
-    Ok(state.db.get_config(&key))
+    Ok(state.db.get_config(&key).await)
 }
 
 /// Save a config value to SQLite
 #[tauri::command]
 async fn save_config(state: tauri::State<'_, AppState>, key: String, value: String) -> Result<bool, String> {
-    state.db.set_config(&key, &value).map_err(|e| e.to_string())?;
+    state.db.set_config(&key, &value).await.map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -85,13 +85,13 @@ async fn set_leverage(state: tauri::State<'_, AppState>, leverage: u32) -> Resul
 /// Get recent trade history
 #[tauri::command]
 async fn get_trade_history(state: tauri::State<'_, AppState>, limit: u32) -> Result<Vec<core::database::TradeRecord>, String> {
-    Ok(state.db.get_recent_trades(limit))
+    Ok(state.db.get_recent_trades(limit).await)
 }
 
 /// Get win rate for a setup type
 #[tauri::command]
 async fn get_win_rate(state: tauri::State<'_, AppState>, reason: String) -> Result<(u32, u32, f64), String> {
-    Ok(state.db.get_win_rate(&reason))
+    Ok(state.db.get_win_rate(&reason).await)
 }
 
 /// Execute an auto order (from AI analysis)
@@ -207,17 +207,17 @@ async fn record_setup_outcome(
         let mut rm = state.risk_manager.lock().await;
         rm.record_outcome(outcome.pnl_pct / 100.0); // store keeps fraction
     }
-    state.db.record_setup_outcome(&outcome).map_err(|e| e.to_string())
+    state.db.record_setup_outcome(&outcome).await.map_err(|e| e.to_string())
 }
 
 /// Query outcomes within a [start_ms, end_ms) range. Used by the weekly report.
 #[tauri::command]
-fn query_setup_outcomes(
-    state: tauri::State<AppState>,
+async fn query_setup_outcomes(
+    state: tauri::State<'_, AppState>,
     start_ms: i64,
     end_ms: i64,
-) -> Vec<core::database::SetupOutcome> {
-    state.db.query_setup_outcomes(start_ms, end_ms)
+) -> Result<Vec<core::database::SetupOutcome>, String> {
+    Ok(state.db.query_setup_outcomes(start_ms, end_ms).await)
 }
 
 /// Write a markdown report to a host file path. Used to drop weekly reports

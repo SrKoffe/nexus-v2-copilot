@@ -88,7 +88,7 @@ impl ExecutionEngine {
             signal.entry_price,
             signal.quantity,
             &signal.reason,
-        );
+        ).await;
 
         *self.active_position.lock().await = Some(pos);
     }
