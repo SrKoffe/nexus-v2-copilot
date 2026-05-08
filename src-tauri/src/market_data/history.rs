@@ -26,15 +26,27 @@ use super::types::Kline;
 ///   }
 /// }
 /// ```
-pub async fn fetch_mexc_klines(symbol: &str, interval: &str, limit: u32) -> Result<Vec<Kline>, String> {
+fn build_mexc_kline_url(symbol: &str, interval: &str) -> Result<reqwest::Url, String> {
     let mexc_interval = normalize_interval(interval);
-    let url = format!(
-        "https://contract.mexc.com/api/v1/contract/kline/{}?interval={}",
-        symbol.to_uppercase(),
-        mexc_interval
-    );
+    let mut url = reqwest::Url::parse("https://contract.mexc.com/api/v1/contract/kline/")
+        .map_err(|e| format!("Internal URL parse error: {}", e))?;
 
-    let response = reqwest::get(&url)
+    {
+        let mut segments = url.path_segments_mut()
+            .map_err(|_| "URL cannot be base")?;
+        segments.push(&symbol.to_uppercase());
+    }
+
+    url.query_pairs_mut()
+        .append_pair("interval", &mexc_interval);
+
+    Ok(url)
+}
+
+pub async fn fetch_mexc_klines(symbol: &str, interval: &str, limit: u32) -> Result<Vec<Kline>, String> {
+    let url = build_mexc_kline_url(symbol, interval)?;
+
+    let response = reqwest::get(url)
         .await
         .map_err(|e| format!("Failed to fetch MEXC klines: {}", e))?;
 
@@ -139,4 +151,34 @@ fn interval_to_ms(interval: &str) -> u64 {
 #[deprecated(note = "Use fetch_mexc_klines instead. fetch_binance_klines now hits MEXC futures.")]
 pub async fn fetch_binance_klines(symbol: &str, interval: &str, limit: u32) -> Result<Vec<Kline>, String> {
     fetch_mexc_klines(symbol, interval, limit).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_mexc_kline_url_encoding() {
+        // Normal case
+        let url = build_mexc_kline_url("BTC_USDT", "1m").unwrap();
+        assert_eq!(url.as_str(), "https://contract.mexc.com/api/v1/contract/kline/BTC_USDT?interval=Min1");
+
+        // Malicious symbol with path traversal/injection
+        let url = build_mexc_kline_url("BTC_USDT/../other", "1m").unwrap();
+        // The '/' should be percent-encoded as %2F
+        assert_eq!(url.as_str(), "https://contract.mexc.com/api/v1/contract/kline/BTC_USDT%2F..%2FOTHER?interval=Min1");
+
+        // Malicious symbol with query injection
+        let url = build_mexc_kline_url("BTC_USDT?other=123", "1m").unwrap();
+        // The '?' should be percent-encoded as %3F
+        assert_eq!(url.as_str(), "https://contract.mexc.com/api/v1/contract/kline/BTC_USDT%3FOTHER=123?interval=Min1");
+    }
+
+    #[test]
+    fn test_normalize_interval() {
+        assert_eq!(normalize_interval("1m"), "Min1");
+        assert_eq!(normalize_interval("1h"), "Min60");
+        assert_eq!(normalize_interval("4h"), "Hour4");
+        assert_eq!(normalize_interval("unknown"), "unknown");
+    }
 }
