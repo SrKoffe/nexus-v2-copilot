@@ -68,7 +68,6 @@ export async function initAnalysisPipeline() {
     // 4. Cascading Pipeline Listeners
     const unlistenLevel1 = await listen('LEVEL_1_PASSED', (event) => {
         const payload = event.payload;
-        // console.log('🔥 [Level 1] Microstructure Gatekeeper Passed:', payload);
         EventBus.emit('LEVEL_1_PASSED', payload);
         // Let L2 engine process it
         if (maestro.processLevel1Signal) {
