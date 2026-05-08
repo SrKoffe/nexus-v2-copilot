@@ -22,10 +22,13 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.9.0",
     "@tauri-apps/cli": "^2",
-    "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.6.0",
+    "happy-dom": "^20.9.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
   }
