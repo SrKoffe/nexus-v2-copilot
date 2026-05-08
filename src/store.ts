@@ -191,6 +191,18 @@ export const useNexusStore = create<NexusState>((set, get) => ({
     markOutcome: (outcome, pnlPct) =>
         set((state) => {
             if (!state.activeSetup) return {};
+
+            // FIX C2: Push outcome back to ScalpEngine for velocity/PnL tracking
+            const adj = state.activeSetup.adjusted as any;
+            if (typeof ScalpEngine !== 'undefined') {
+                ScalpEngine.recordOutcome({
+                    type: adj.type || 'unknown',
+                    pnlPct: pnlPct,
+                    feesMarginPct: adj.feesMarginPct || 0,
+                    rrRealized: pnlPct / (adj.stopLossMarginPct || 1)
+                });
+            }
+
             const updated: SetupHistoryEntry = {
                 ...state.activeSetup,
                 outcome,
