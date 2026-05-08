@@ -1,7 +1,5 @@
-// @ts-nocheck
 import { invoke } from '@tauri-apps/api/core';
 import { EventBus } from './event-bus';
-import { StateCache } from './state-cache';
 import { Indicators } from './indicators';
 import { MarketStateEngine } from './market-state';
 import { LiquidityEngine } from './liquidity';
@@ -11,10 +9,13 @@ import { VolumeProfile } from './volume-profile';
 import { useNexusStore } from '../store';
 
 export class MasterAnalysisEngine {
+    private isInitialized: boolean;
+    private isProcessing: boolean;
+    private lastAnalysisPrice: number;
+
     constructor() {
         this.isInitialized = false;
-        this.lastSignal = null;
-        this.isProcessing = false;
+                        this.isProcessing = false;
         this.lastAnalysisPrice = 0;  // v3.0: Price-triggered optimization
     }
 
@@ -24,18 +25,18 @@ export class MasterAnalysisEngine {
         console.log('[MAESTRO v2] Initializing Institutional Pipeline...');
 
         // v3.0: Optimized trigger system (Price Movement based)
-        EventBus.on('TICK_UPDATE', (data) => {
+        EventBus.on('TICK_UPDATE', (data: any) => {
             this.analyze(data);
         });
 
-        EventBus.on('CANDLE_CLOSE', (data) => {
+        EventBus.on('CANDLE_CLOSE', (data: any) => {
             this.analyze(data, true); // Force on candle close
         });
 
         this.isInitialized = true;
     }
 
-    async analyze(marketData, force = false) {
+    async analyze(marketData: any, force: boolean = false) {
         if (!marketData || !marketData.candles1m) return null;
 
         const candles = marketData.candles1m;
@@ -53,14 +54,14 @@ export class MasterAnalysisEngine {
 
             // 1. Run Engines
             const mse = MarketStateEngine.analyze(candles);
-            const ill = LiquidityEngine.analyze(candles);
-            const vpe = VolumeProfile.getSummary ? VolumeProfile.getSummary() : null;
+            const ill = (LiquidityEngine as any).analyze(candles);
+            const vpe = (VolumeProfile as any).getSummary ? (VolumeProfile as any).getSummary() : null;
             
             // 2. Calculate Indicators
             const indicators = {
-                rsi: Indicators.RSI(candles.map(c => c.close)),
-                macd: Indicators.MACD(candles.map(c => c.close)),
-                bb: Indicators.BollingerBands(candles.map(c => c.close)),
+                rsi: (Indicators as any).RSI(candles.map((c: any) => c.close)),
+                macd: (Indicators as any).MACD(candles.map((c: any) => c.close)),
+                bb: (Indicators as any).BollingerBands(candles.map((c: any) => c.close)),
                 fvg: Indicators.FairValueGap(candles),
                 atr: Indicators.ATR(candles),
                 vwap: Indicators.VWAP(candles)
@@ -91,8 +92,8 @@ export class MasterAnalysisEngine {
                     strength: mse.regime?.confidence 
                 },
                 ill: { 
-                    sweeps: ill.sweeps?.length || 0,
-                    confirmed: ill.sweeps?.filter(s => s.confirmed).length || 0
+                    sweeps: (ill as any).sweeps?.length || 0,
+                    confirmed: (ill as any).sweeps?.filter((s: any) => s.confirmed).length || 0
                 }
             };
 
@@ -124,7 +125,7 @@ export class MasterAnalysisEngine {
         }
     }
 
-    _resolveDirection(mse, ill, confluence) {
+    _resolveDirection(mse: any, ill: any, confluence: any) {
         // 1. Priority: Institutional Sweeps (High conviction liquidity shift)
         if (ill && ill.sweeps && ill.sweeps.length > 0) {
             const sweep = ill.sweeps[ill.sweeps.length - 1];
@@ -148,7 +149,7 @@ export class MasterAnalysisEngine {
         return { bias: 'neutral', source: 'Neutral' };
     }
 
-    processLevel1Signal(payload) {
+    processLevel1Signal(payload: any) {
         // Level 2: Confluence & AMT Spatial Validation
         const setStatus = useNexusStore.getState().setPipelineStage;
         
@@ -199,7 +200,7 @@ export class MasterAnalysisEngine {
         }
     }
 
-    async _executeTrade(direction, score, price) {
+    async _executeTrade(direction: any, score: number, price: number) {
         this.isProcessing = true;
         try {
             const setup = ScalpEngine.calculateSetup(direction);
