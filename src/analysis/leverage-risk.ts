@@ -387,9 +387,9 @@ export const LeverageAdjustedRiskEngine = {
                 `Estatisticamente perdedor se confidence calibrada.`
             );
         }
-        if (feesMarginPct > config.tp1TargetNetMarginPct) {
+        if (feesMarginPct > effectiveTp1NetFinal) {
             warnings.push(
-                `Fees (${feesMarginPct.toFixed(1)}% margem) > TP1 net (${config.tp1TargetNetMarginPct}%). ` +
+                `Fees (${feesMarginPct.toFixed(1)}% margem) > TP1 net (${effectiveTp1NetFinal.toFixed(1)}%). ` +
                 `TP1 mal cobre fees — considere TP1 maior ou leverage menor.`
             );
         }
@@ -463,11 +463,11 @@ export const LeverageAdjustedRiskEngine = {
             takeProfit1,
             takeProfit1Pct: tp1PricePct,
             takeProfit1MarginGross: tp1LiqUsed ? (tp1PricePct * leverage) : tp1GrossMargin,
-            takeProfit1MarginNet: tp1LiqUsed ? effectiveTp1NetFinal : config.tp1TargetNetMarginPct,
+            takeProfit1MarginNet: effectiveTp1NetFinal,
             takeProfit2,
             takeProfit2Pct: tp2PricePct,
             takeProfit2MarginGross: tp2GrossMargin,
-            takeProfit2MarginNet: config.tp2TargetNetMarginPct,
+            takeProfit2MarginNet: effectiveTp2Net,
             feesMarginPct,
             slippageMarginPct,
             breakEvenWinRate,
