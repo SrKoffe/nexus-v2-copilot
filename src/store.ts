@@ -177,7 +177,7 @@ export const useNexusStore = create<NexusState>((set, get) => ({
         // not when a signal is generated.
         const adj = pending.adjusted as any;
         if (adj.direction && typeof ScalpEngine !== 'undefined') {
-            ScalpEngine.recordUserTradeEmission(adj.direction);
+            (ScalpEngine as any).recordUserTradeEmission(adj.direction);
         }
         set({ activeSetup: pending, pendingSetup: null });
     },
