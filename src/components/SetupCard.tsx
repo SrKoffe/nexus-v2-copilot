@@ -29,6 +29,9 @@ export const SetupCard: React.FC = () => {
     // ─── Accepted setup ───
     const setup = pendingSetup.adjusted as AdjustedSetup;
     const isLong = setup.direction === 'long';
+    const tier = setup.tier || 'C';
+    const tierColor = tier === 'A+' ? '#00e1ff' : tier === 'A' ? '#00ff88' : tier === 'B' ? '#ffb800' : '#ff3366';
+
     const color = isLong ? '#00e1ff' : '#ff3366';
 
     const evColor =
@@ -51,9 +54,23 @@ export const SetupCard: React.FC = () => {
         }}>
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="mono" style={{ color, fontWeight: 'bold', fontSize: '1.2rem' }}>
-                    {isLong ? '↑ LONG' : '↓ SHORT'} {setup.symbol}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <span className="mono" style={{ color, fontWeight: 'bold', fontSize: '1.2rem' }}>
+                        {isLong ? '↑ LONG' : '↓ SHORT'} {setup.symbol}
+                    </span>
+                    <span style={{
+                        background: `${tierColor}22`,
+                        color: tierColor,
+                        border: `1px solid ${tierColor}66`,
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        marginLeft: '8px'
+                    }}>
+                        Tier {tier}
+                    </span>
+                </div>
                 <span className="mono text-xs" style={{ background: `${color}20`, padding: '4px 8px', borderRadius: '4px', color }}>
                     CONF: {(setup.confidence * 100).toFixed(0)}% · {setup.leverage}x
                 </span>
@@ -254,13 +271,10 @@ const ActiveIdleView: React.FC<{
     const universeCount = useScannerStore(s => s.universe.length);
     const topCandidates = useScannerStore(s => s.topCandidates);
     const lastUpdateMs = useScannerStore(s => s.lastUpdateMs);
-    const aggressionMode = useNexusStore(s => s.aggressionMode);
     const currentRegime = useNexusStore(s => s.currentRegime);
 
     // Buckets úteis ao trader, derivados em <1ms
     const highScore = topCandidates.filter(t => t.opportunity_score > 30).length;
-    const trendCount = topCandidates.filter(t => t.regime === 'TREND_UP' || t.regime === 'TREND_DOWN').length;
-    const chaosCount = topCandidates.filter(t => t.regime === 'CHAOTIC').length;
 
     const ageSec = lastUpdateMs > 0 ? Math.floor((Date.now() - lastUpdateMs) / 1000) : null;
     const stale = ageSec !== null && ageSec > 5;
@@ -291,7 +305,7 @@ const ActiveIdleView: React.FC<{
                         ? `Pipeline L${pipelineStage} evaluating…`
                         : universeCount === 0
                             ? 'Connecting to scanner…'
-                            : 'Scanning universe'}
+                            : `Scanning ${universeCount} markets...`}
                 </span>
                 <span style={{ marginLeft: 'auto', fontSize: '9px', color: stale ? '#ff7777' : '#666' }}>
                     {ageSec !== null ? `${ageSec}s ago` : '—'}
@@ -300,8 +314,8 @@ const ActiveIdleView: React.FC<{
 
             {/* Live counters */}
             <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
+                display: 'flex',
+                flexDirection: 'column',
                 gap: '8px',
                 padding: '10px 12px',
                 background: 'rgba(0, 225, 255, 0.04)',
@@ -309,12 +323,9 @@ const ActiveIdleView: React.FC<{
                 borderRadius: '6px',
                 fontSize: '11px',
             }}>
-                <Counter label="markets" value={universeCount} color="#88ccdd" />
-                <Counter label="ranked" value={topCandidates.length} color="#00e1ff" />
-                <Counter label="high score" value={highScore} color={highScore > 0 ? '#00ff88' : '#666'} />
-                <Counter label="trending" value={trendCount} color={trendCount > 0 ? '#00ff88' : '#888'} />
-                <Counter label="chaotic" value={chaosCount} color={chaosCount > 0 ? '#ff7799' : '#888'} hint="filtered out" />
-                <Counter label={`mode`} value={aggressionMode.slice(0, 4).toUpperCase()} color="#ffb800" />
+                <div style={{ color: '#00e1ff' }}>{topCandidates.filter(t => t.opportunity_score > 20).length} liquidity imbalances detected</div>
+                <div style={{ color: '#00ff88' }}>{topCandidates.length} ranked opportunities</div>
+                <div style={{ color: '#ffb800' }}>{highScore} high-EV setups</div>
             </div>
 
             {/* Top 3 preview line */}
@@ -361,15 +372,6 @@ const ActiveIdleView: React.FC<{
     );
 };
 
-const Counter: React.FC<{ label: string; value: number | string; color: string; hint?: string }> = ({ label, value, color, hint }) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px' }}>
-        <span style={{ color: '#666', fontSize: '9px', letterSpacing: '0.5px' }}>
-            {label}
-            {hint && <span style={{ color: '#444', marginLeft: '4px', fontSize: '8px' }}>({hint})</span>}
-        </span>
-        <span style={{ color, fontWeight: 700, fontSize: '13px' }}>{value}</span>
-    </div>
-);
 
 // ─── Rejected setup view ──────────────────────────────────────────────────
 

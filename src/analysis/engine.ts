@@ -108,7 +108,7 @@ export class MasterAnalysisEngine {
             const volScore = ScalpEngine._state?.lastVolatilityScore || 50;
             
             // Adapt threshold to market conditions
-            let executionThreshold = 0.65; // Standard
+            let executionThreshold = 0.35; // Standard
             if (volScore > 70) executionThreshold = 0.75; // Pre-news / High noise filter
             if (regime === 'range') executionThreshold = 0.55; // Earlier entry in accumulation
 

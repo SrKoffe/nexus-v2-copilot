@@ -58,6 +58,7 @@ export interface NaturalSetup {
 }
 
 export interface AdjustedSetup {
+    tier?: 'A+' | 'A' | 'B' | 'C';
     accepted: true;
     symbol: string;
     direction: Direction;
@@ -238,13 +239,6 @@ export const LeverageAdjustedRiskEngine = {
         // Min confidence gate. Mode-aware threshold lives in ScalpEngine/Maestro;
         // this is just the floor. If a setup got here, the upstream pipeline
         // already passed its mode-specific threshold.
-        if (setup.confidence < config.minConfidence) {
-            return {
-                accepted: false,
-                code: 'CONFIDENCE_TOO_LOW',
-                reason: `Confidence ${(setup.confidence * 100).toFixed(0)}% < ${(config.minConfidence * 100).toFixed(0)}%`,
-            };
-        }
 
         const isLong = setup.direction === 'long';
 
@@ -378,6 +372,9 @@ export const LeverageAdjustedRiskEngine = {
 
         // ─── 10. Warnings ───
         const warnings: string[] = [];
+        if (setup.confidence < config.minConfidence) {
+            warnings.push(`Low confidence (${(setup.confidence * 100).toFixed(0)}% < min ${(config.minConfidence * 100).toFixed(0)}%). Speculative setup.`);
+        }
         if (leverage >= 100) {
             warnings.push(`Leverage ${leverage}x — qualquer ruído de 0.5%+ liquida.`);
         }
@@ -433,15 +430,15 @@ export const LeverageAdjustedRiskEngine = {
         const totalCost = feesMarginPct + slippageMarginPct;
         const evThreshold = totalCost * config.evMultiplier;
 
-        if (ev.ev < evThreshold) {
-            return {
-                accepted: false,
-                code: 'EV_NOT_POSITIVE',
-                reason:
-                    `EV ${ev.ev.toFixed(2)}% < threshold ${evThreshold.toFixed(2)}% margem ` +
-                    `(p=${(probResult.probability * 100).toFixed(0)}%, fees+slip=${totalCost.toFixed(2)}%, blended TP=${blendedTpNet.toFixed(1)}%, SL=${slMarginPct.toFixed(1)}%). ` +
-                    `Sem edge estatístico.`,
-            };
+        let tier: 'A+' | 'A' | 'B' | 'C' = 'C';
+        if (ev.ev >= evThreshold * 1.5 && setup.confidence >= 0.65) {
+            tier = 'A+';
+        } else if (ev.ev >= evThreshold && setup.confidence >= 0.50) {
+            tier = 'A';
+        } else if (ev.ev > 0 || setup.confidence >= 0.40) {
+            tier = 'B';
+        } else {
+            tier = 'C';
         }
 
         // EV warnings (non-blocking but visible)
@@ -454,6 +451,7 @@ export const LeverageAdjustedRiskEngine = {
 
         return {
             accepted: true,
+            tier,
             symbol: setup.symbol,
             direction: setup.direction,
             entryPrice: setup.entryPrice,

@@ -177,7 +177,7 @@ export const useNexusStore = create<NexusState>((set, get) => ({
         // not when a signal is generated.
         const adj = pending.adjusted as any;
         if (adj.direction && typeof ScalpEngine !== 'undefined') {
-            ScalpEngine.recordUserTradeEmission(adj.direction);
+            (ScalpEngine as any).recordUserTradeEmission(adj.direction);
         }
         set({ activeSetup: pending, pendingSetup: null });
     },
@@ -333,7 +333,7 @@ export const useScannerStore = create<ScannerState>()(
                             interval: 'Min1',
                             limit: 200,
                         });
-                        if (history && history.length > 0) {
+                        if (history && (history as any).length > 0) {
                             candleManager.setHistory(history);
                         }
                     } catch (e) {

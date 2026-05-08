@@ -20,7 +20,7 @@ export function useRegimeDetection() {
 
     useEffect(() => {
         const evaluate = () => {
-            const candles = candleManager.candles1m;
+            const candles = (candleManager as any).candles1m;
             const result = RegimeEngine.evaluate(candles);
             // RegimeEngine already emitted REGIME_DETECTED if result was non-null;
             // listener below catches that. We don't push directly here to keep

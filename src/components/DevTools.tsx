@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { EventBus } from '../analysis/event-bus';
 import { useNexusStore } from '../store';
 import { LeverageAdjustedRiskEngine, DEFAULT_CONFIG, type NaturalSetup } from '../analysis/leverage-risk';
-import { RegimeEngine, type Regime } from '../analysis/regime-engine';
+import { type Regime } from '../analysis/regime-engine';
 import { generateAndSaveWeeklyReport } from '../analysis/report';
 
 /**
@@ -139,24 +139,6 @@ export const DevTools: React.FC = () => {
 
             // v5.2e: Direct pipeline execution (no EventBus dependency)
             // Regime gate
-            const hint = RegimeEngine.behaviorHint(s.currentRegime);
-            if (hint.block) {
-                const blockedEntry: any = {
-                    natural,
-                    adjusted: {
-                        accepted: false,
-                        code: 'EV_NOT_POSITIVE',
-                        reason: `Regime ${s.currentRegime.toUpperCase()} blocks setups`,
-                    },
-                    detectedAt: Date.now(),
-                    outcome: null,
-                    pnlPct: null,
-                };
-                s.setPendingSetup(blockedEntry);
-                s.addToHistory(blockedEntry);
-                console.log('[DevTools] Injected (BLOCKED by regime):', scenario);
-                return;
-            }
 
             const config = {
                 ...DEFAULT_CONFIG,
