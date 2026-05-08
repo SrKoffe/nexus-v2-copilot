@@ -311,15 +311,11 @@ export const VolumeProfile = {
     // BIN OPERATIONS
     // ═══════════════════════════════════════════════════════════════════════
 
-    /**
-     * Add a candle's volume to bins. O(B) where B = bins touched.
-     */
-    _addCandle(candle) {
-        const binWidth = this._state.binWidth;
-        if (binWidth <= 0 || candle.high - candle.low <= 0) return;
+    _processCandleVolume(candle, binWidth) {
+        if (binWidth <= 0 || candle.high - candle.low <= 0) return null;
 
         const vol = candle.volume || 0;
-        if (vol <= 0) return;
+        if (vol <= 0) return null;
 
         // Cap extreme volume
         const cappedVol = this._state.volumeMA > 0
@@ -333,6 +329,20 @@ export const VolumeProfile = {
 
         const lowBin = Math.floor(candle.low / binWidth);
         const highBin = Math.floor(candle.high / binWidth);
+
+        return { cappedVol, candleRange, buyRatio, lowBin, highBin };
+    },
+
+    /**
+     * Add a candle's volume to bins. O(B) where B = bins touched.
+     */
+    _addCandle(candle) {
+        const binWidth = this._state.binWidth;
+
+        const processResult = this._processCandleVolume(candle, binWidth);
+        if (!processResult) return;
+
+        const { cappedVol, candleRange, buyRatio, lowBin, highBin } = processResult;
 
         for (let b = lowBin; b <= highBin; b++) {
             const binLow = b * binWidth;
@@ -376,22 +386,11 @@ export const VolumeProfile = {
      */
     _removeCandle(candle) {
         const binWidth = this._state.binWidth;
-        if (binWidth <= 0 || candle.high - candle.low <= 0) return;
 
-        const vol = candle.volume || 0;
-        if (vol <= 0) return;
+        const processResult = this._processCandleVolume(candle, binWidth);
+        if (!processResult) return;
 
-        const cappedVol = this._state.volumeMA > 0
-            ? Math.min(vol, this._state.volumeMA * this.config.maxCandleContribution)
-            : vol;
-
-        const candleRange = candle.high - candle.low;
-        const isBull = candle.close >= candle.open;
-        const closePosition = candleRange > 0 ? (candle.close - candle.low) / candleRange : 0.5;
-        const buyRatio = isBull ? (0.5 + closePosition * 0.3) : (0.2 + closePosition * 0.3);
-
-        const lowBin = Math.floor(candle.low / binWidth);
-        const highBin = Math.floor(candle.high / binWidth);
+        const { cappedVol, candleRange, buyRatio, lowBin, highBin } = processResult;
 
         for (let b = lowBin; b <= highBin; b++) {
             const binLow = b * binWidth;
