@@ -117,7 +117,7 @@ export const ProbabilityModel = {
      * Returns clamped probability + factor breakdown.
      */
     estimateHitProbability(input: ProbabilityInputs): ProbabilityResult {
-        const { entryPrice, target, stop, direction, momentumAlignment, liquidityStrength, atr, regime } = input;
+        const { entryPrice, target, direction, momentumAlignment, liquidityStrength, atr, regime } = input;
 
         // Distance to target in ATRs (defaults to 2 ATRs if no ATR provided)
         let atrMultiples = 2;

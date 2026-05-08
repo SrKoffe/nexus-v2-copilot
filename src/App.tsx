@@ -182,8 +182,8 @@ function App() {
         const handleAnalysisSync = () => {
             // Read directly from ScalpEngine state (lightweight — no computation)
             if (typeof ScalpEngine !== 'undefined' && ScalpEngine._state) {
-                const s = ScalpEngine._state;
-                const perf = ScalpEngine._performance;
+                const s = ScalpEngine._state as any;
+                const perf = ScalpEngine._performance as any;
                 useNexusStore.getState().syncEngineState({
                     operatingMode: s.currentMode || 'swing_scalp',
                     velocityState: {
