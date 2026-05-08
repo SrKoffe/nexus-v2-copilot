@@ -281,25 +281,40 @@ export const RegimeEngine = {
 
     /**
      * Suggested behavior modifier for downstream engines.
-     * Used by ScalpEngine to decide whether to relax/block setups.
+     *
+     * v6.2 philosophy: regime is a MODULATOR, not a blocker. The system never
+     * hard-blocks based on regime alone — instead it adjusts EV multipliers
+     * and confidence floors. The user's AggressionMode is the lever that
+     * decides whether to trade through chaos or sit out. Hunter mode + chaotic
+     * regime can still produce setups; Conservative mode + chaotic regime
+     * effectively rejects via the elevated threshold.
+     *
+     * Returned fields:
+     *   - evMultiplier: multiplied with config.evMultiplier (>1 = stricter EV gate)
+     *   - confidenceDelta: added to config.minConfidence (positive = stricter)
+     *   - sizeMultiplier: scales recommended position size
+     *   - biasDirection: preferred direction (or null = no bias)
      */
     behaviorHint(regime: Regime): {
-        block: boolean;            // hard block all setups
-        thresholdDelta: number;    // adjust min confidence threshold (negative = looser)
-        sizeMultiplier: number;    // multiply position size
-        biasDirection: 'long' | 'short' | null;   // preferred direction (or null = both)
+        evMultiplier: number;
+        confidenceDelta: number;
+        sizeMultiplier: number;
+        biasDirection: 'long' | 'short' | null;
     } {
         switch (regime) {
             case 'trend_up':
-                return { block: false, thresholdDelta: -0.05, sizeMultiplier: 1.0, biasDirection: 'long' };
+                return { evMultiplier: 0.90, confidenceDelta: -0.05, sizeMultiplier: 1.00, biasDirection: 'long' };
             case 'trend_down':
-                return { block: false, thresholdDelta: -0.05, sizeMultiplier: 1.0, biasDirection: 'short' };
+                return { evMultiplier: 0.90, confidenceDelta: -0.05, sizeMultiplier: 1.00, biasDirection: 'short' };
             case 'range':
-                return { block: false, thresholdDelta: 0.0, sizeMultiplier: 0.85, biasDirection: null };
+                return { evMultiplier: 1.00, confidenceDelta:  0.00, sizeMultiplier: 0.85, biasDirection: null };
             case 'chaotic':
-                return { block: true, thresholdDelta: 0.20, sizeMultiplier: 0.0, biasDirection: null };
+                // No more hard-block. Steeply elevated EV gate + size cut means
+                // only Hunter mode (evMul 0.8) can sneak setups through, and
+                // even those require unusually strong probability.
+                return { evMultiplier: 1.60, confidenceDelta:  0.15, sizeMultiplier: 0.40, biasDirection: null };
             case 'transition':
-                return { block: false, thresholdDelta: 0.05, sizeMultiplier: 0.65, biasDirection: null };
+                return { evMultiplier: 1.10, confidenceDelta:  0.05, sizeMultiplier: 0.65, biasDirection: null };
         }
     },
 };

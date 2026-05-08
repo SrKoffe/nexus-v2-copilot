@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNexusStore } from '../store';
+import { useNexusStore, useScannerStore } from '../store';
 import type { AdjustedSetup, RejectedSetup } from '../analysis/leverage-risk';
 
 /**
@@ -16,16 +16,9 @@ export const SetupCard: React.FC = () => {
     const pipelineStage = useNexusStore(s => s.pipelineStage);
     const markActive = useNexusStore(s => s.markPendingAsActive);
 
-    // ─── Empty / pipeline running ───
+    // ─── Empty / pipeline running — v6.3 active scanner-aware idle state ───
     if (!pendingSetup) {
-        return (
-            <div style={{ padding: '24px', textAlign: 'center', color: '#8892b0' }} className="mono text-sm">
-                <div style={{ fontSize: '24px', opacity: 0.3, marginBottom: '8px' }}>⌖</div>
-                {pipelineStage > 0 && pipelineStage < 5 && pipelineStatus === 'evaluating'
-                    ? `Pipeline L${pipelineStage} evaluating...`
-                    : 'Watching markets — no setup yet'}
-            </div>
-        );
+        return <ActiveIdleView pipelineStage={pipelineStage} pipelineStatus={pipelineStatus} />;
     }
 
     // ─── Rejected setup (still informative) ───
@@ -249,6 +242,134 @@ export const SetupCard: React.FC = () => {
         </div>
     );
 };
+
+// ─── Active idle view (v6.3) ──────────────────────────────────────────────
+// Sistema NUNCA parece morto. Mostra contagem ao vivo do scanner pra dar
+// sensação de atividade contínua mesmo sem setup confirmado.
+
+const ActiveIdleView: React.FC<{
+    pipelineStage: number;
+    pipelineStatus: string;
+}> = ({ pipelineStage, pipelineStatus }) => {
+    const universeCount = useScannerStore(s => s.universe.length);
+    const topCandidates = useScannerStore(s => s.topCandidates);
+    const lastUpdateMs = useScannerStore(s => s.lastUpdateMs);
+    const aggressionMode = useNexusStore(s => s.aggressionMode);
+    const currentRegime = useNexusStore(s => s.currentRegime);
+
+    // Buckets úteis ao trader, derivados em <1ms
+    const highScore = topCandidates.filter(t => t.opportunity_score > 30).length;
+    const trendCount = topCandidates.filter(t => t.regime === 'TREND_UP' || t.regime === 'TREND_DOWN').length;
+    const chaosCount = topCandidates.filter(t => t.regime === 'CHAOTIC').length;
+
+    const ageSec = lastUpdateMs > 0 ? Math.floor((Date.now() - lastUpdateMs) / 1000) : null;
+    const stale = ageSec !== null && ageSec > 5;
+
+    const isEvaluating = pipelineStage > 0 && pipelineStage < 5 && pipelineStatus === 'evaluating';
+
+    return (
+        <div style={{
+            padding: '18px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px',
+            color: '#8892b0',
+            fontFamily: 'JetBrains Mono, monospace',
+        }}>
+            {/* Pulse + status line */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: stale ? '#ff7777' : '#00e1ff',
+                    boxShadow: stale ? '0 0 6px #ff777755' : '0 0 8px #00e1ff80',
+                    animation: stale ? undefined : 'idle-pulse 1.6s ease-in-out infinite',
+                }} />
+                <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '0.5px', color: '#ddd' }}>
+                    {isEvaluating
+                        ? `Pipeline L${pipelineStage} evaluating…`
+                        : universeCount === 0
+                            ? 'Connecting to scanner…'
+                            : 'Scanning universe'}
+                </span>
+                <span style={{ marginLeft: 'auto', fontSize: '9px', color: stale ? '#ff7777' : '#666' }}>
+                    {ageSec !== null ? `${ageSec}s ago` : '—'}
+                </span>
+            </div>
+
+            {/* Live counters */}
+            <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '8px',
+                padding: '10px 12px',
+                background: 'rgba(0, 225, 255, 0.04)',
+                border: '1px solid rgba(0, 225, 255, 0.12)',
+                borderRadius: '6px',
+                fontSize: '11px',
+            }}>
+                <Counter label="markets" value={universeCount} color="#88ccdd" />
+                <Counter label="ranked" value={topCandidates.length} color="#00e1ff" />
+                <Counter label="high score" value={highScore} color={highScore > 0 ? '#00ff88' : '#666'} />
+                <Counter label="trending" value={trendCount} color={trendCount > 0 ? '#00ff88' : '#888'} />
+                <Counter label="chaotic" value={chaosCount} color={chaosCount > 0 ? '#ff7799' : '#888'} hint="filtered out" />
+                <Counter label={`mode`} value={aggressionMode.slice(0, 4).toUpperCase()} color="#ffb800" />
+            </div>
+
+            {/* Top 3 preview line */}
+            {topCandidates.length > 0 && (
+                <div style={{
+                    fontSize: '10px',
+                    color: '#666',
+                    padding: '8px 12px',
+                    background: 'rgba(0,0,0,0.25)',
+                    borderRadius: '4px',
+                    border: '1px solid rgba(255,255,255,0.04)',
+                }}>
+                    <span style={{ color: '#888', letterSpacing: '0.5px' }}>TOP 3 ·</span>{' '}
+                    {topCandidates.slice(0, 3).map((c, i) => (
+                        <span key={c.symbol} style={{ marginRight: '10px' }}>
+                            <span style={{ color: '#ddd' }}>{c.symbol.replace('_USDT', '')}</span>
+                            <span style={{
+                                color: c.rise_fall_rate >= 0 ? '#00ff88' : '#ff3366',
+                                marginLeft: '4px',
+                                fontSize: '9px',
+                            }}>
+                                {c.rise_fall_rate >= 0 ? '+' : ''}{(c.rise_fall_rate * 100).toFixed(1)}%
+                            </span>
+                            {i < 2 && <span style={{ color: '#444', marginLeft: '8px' }}>·</span>}
+                        </span>
+                    ))}
+                </div>
+            )}
+
+            {/* Hint footer */}
+            <div style={{ fontSize: '9px', color: '#444', textAlign: 'center', letterSpacing: '0.5px' }}>
+                regime <span style={{ color: '#888' }}>{currentRegime.toUpperCase()}</span>
+                {' · '}
+                deep analysis on active symbol only — switch via scanner panel
+            </div>
+
+            <style>{`
+                @keyframes idle-pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.4; }
+                }
+            `}</style>
+        </div>
+    );
+};
+
+const Counter: React.FC<{ label: string; value: number | string; color: string; hint?: string }> = ({ label, value, color, hint }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px' }}>
+        <span style={{ color: '#666', fontSize: '9px', letterSpacing: '0.5px' }}>
+            {label}
+            {hint && <span style={{ color: '#444', marginLeft: '4px', fontSize: '8px' }}>({hint})</span>}
+        </span>
+        <span style={{ color, fontWeight: 700, fontSize: '13px' }}>{value}</span>
+    </div>
+);
 
 // ─── Rejected setup view ──────────────────────────────────────────────────
 

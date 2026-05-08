@@ -66,6 +66,21 @@ interface NexusState {
     lastBalanceFetchAt: number;
     setLastBalanceFetchAt: (ts: number) => void;
 
+    // ─── Aggression Mode (v6.1) ───
+    /**
+     * User-controlled aggression mode. Modulates EV gate + min confidence in
+     * runtime so the trader can shift between strict edge filtering (Conservative)
+     * and opportunistic scalp hunting (Hunter) without changing engine code.
+     *
+     * Multipliers applied in App.tsx handleSetup → LeverageRiskConfig:
+     *   conservative → evMultiplier 1.5,  minConfidence 0.65  (very strict)
+     *   balanced     → evMultiplier 1.2,  minConfidence 0.55  (default)
+     *   aggressive   → evMultiplier 1.0,  minConfidence 0.45  (cover friction only)
+     *   hunter       → evMultiplier 0.8,  minConfidence 0.35  (accept thin edge)
+     */
+    aggressionMode: 'conservative' | 'balanced' | 'aggressive' | 'hunter';
+    setAggressionMode: (m: 'conservative' | 'balanced' | 'aggressive' | 'hunter') => void;
+
     /** Live open positions from MEXC futures (read-only). [] if no positions or keys missing. */
     openMexcPositions: MexcPosition[];
     setOpenMexcPositions: (positions: MexcPosition[]) => void;
@@ -195,6 +210,10 @@ export const useNexusStore = create<NexusState>((set, get) => ({
 
     lastBalanceFetchAt: 0,
     setLastBalanceFetchAt: (ts) => set({ lastBalanceFetchAt: ts }),
+
+    // ─── Aggression Mode (v6.1) ───
+    aggressionMode: 'balanced' as const,
+    setAggressionMode: (m) => set({ aggressionMode: m }),
 
     openMexcPositions: [],
     setOpenMexcPositions: (positions) => set({ openMexcPositions: positions }),

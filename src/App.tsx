@@ -14,6 +14,7 @@ import { LeverageSelector } from './components/LeverageSelector';
 import { DevTools } from './components/DevTools';
 import { MarketStateBadge } from './components/MarketStateBadge';
 import { OpportunityScannerPanel } from './components/OpportunityScannerPanel';
+import { AggressionModeSelector, aggressionModifiers } from './components/AggressionModeSelector';
 import { useMexcAccount } from './hooks/useMexcAccount';
 import { useRegimeDetection } from './hooks/useRegimeDetection';
 import './App.css';
@@ -96,33 +97,27 @@ function App() {
         const handleSetup = (natural: NaturalSetup) => {
             const s = useNexusStore.getState();
 
-            // v5.2d: hard block via regime behavior hint.
-            // CHAOTIC regime returns block=true and we reject before running the
-            // EV pipeline at all. Other regimes flow through normally.
-            const hint = RegimeEngine.behaviorHint(s.currentRegime);
-            if (hint.block) {
-                const blockedEntry = {
-                    natural,
-                    adjusted: {
-                        accepted: false as const,
-                        code: 'EV_NOT_POSITIVE' as const, // closest existing code; v5.2 reuses it for chaos
-                        reason: `Regime ${s.currentRegime.toUpperCase()} blocks setups (volatility spike + whipsaw)`,
-                    },
-                    detectedAt: Date.now(),
-                    outcome: null,
-                    pnlPct: null,
-                };
-                setPendingSetup(blockedEntry);
-                addToHistory(blockedEntry);
-                return;
-            }
+            // v6.2: regime is a MODULATOR, not a blocker. AggressionMode is
+            // the user's lever; regime hint stacks multiplicatively on top.
+            // Hunter mode + chaotic regime can still produce setups if EV is
+            // strong enough; Conservative mode + chaotic effectively rejects.
+            const regimeHint = RegimeEngine.behaviorHint(s.currentRegime);
+            const aggrMods = aggressionModifiers(s.aggressionMode);
 
-            // Build config: defaults + user overrides from store (F7 scalper config)
+            // Stack multipliers: stricter of the two wins, but they compose.
+            const stackedEvMul = DEFAULT_CONFIG.evMultiplier * aggrMods.evMultiplier * regimeHint.evMultiplier;
+            const stackedMinConf = Math.min(0.85,
+                Math.max(0.20, aggrMods.minConfidence + regimeHint.confidenceDelta)
+            );
+
+            // Build config: defaults + user F7 overrides + v6.1/v6.2 modulators
             const config = {
                 ...DEFAULT_CONFIG,
                 tp1TargetNetMarginPct: s.tp1NetTarget,
                 tp2TargetNetMarginPct: s.tp2NetTarget,
                 takerFeePct: s.takerFeePct,
+                evMultiplier: stackedEvMul,
+                minConfidence: stackedMinConf,
             };
             // v5.2: enrich natural setup with current regime so ProbabilityModel
             // can apply alignment bonus/penalty.
@@ -231,6 +226,9 @@ function App() {
 
                 {/* v5.1: Level-0 regime cue, prominent next to ticker */}
                 <MarketStateBadge />
+
+                {/* v6.1: Aggression mode — user-controlled EV gate modulator */}
+                <AggressionModeSelector />
 
                 <LeverageSelector />
 
