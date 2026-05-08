@@ -172,9 +172,7 @@ export const useNexusStore = create<NexusState>((set, get) => ({
     markPendingAsActive: () => {
         const pending = get().pendingSetup;
         if (!pending || !pending.adjusted.accepted) return;
-        // FIX C6: Record ACTUAL trade emission for velocity control.
-        // This fires ONLY when the user confirms "I'm taking this trade",
-        // not when a signal is generated.
+
         const adj = pending.adjusted as any;
         if (adj.direction && typeof ScalpEngine !== 'undefined') {
             ScalpEngine.recordUserTradeEmission(adj.direction);

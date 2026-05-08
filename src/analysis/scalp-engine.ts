@@ -87,7 +87,8 @@ export const ScalpEngine = {
         lastLatencyMs: 0,
         lastVolatilityScore: 0,
         currentLeverage: 10,
-        isLiveSimActive: false
+        isLiveSimActive: false,
+        recentTradeTimestamps: []
     },
 
 
@@ -472,6 +473,18 @@ export const ScalpEngine = {
         }
         this._selfTune();
     },
+
+    recordUserTradeEmission(direction: string) {
+        if (!this._state.recentTradeTimestamps) {
+            this._state.recentTradeTimestamps = [];
+        }
+        const now = Date.now();
+        this._state.recentTradeTimestamps.push(now);
+        // Keep only timestamps from the last 60 seconds
+        this._state.recentTradeTimestamps = this._state.recentTradeTimestamps.filter(t => now - t < 60000);
+        console.log(`[ScalpEngine] User trade recorded (${direction}). TPM: ${this._state.recentTradeTimestamps.length}`);
+    },
+
 
     getStatus() {
         return {
