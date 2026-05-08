@@ -172,10 +172,12 @@ export const useNexusStore = create<NexusState>((set, get) => ({
     markPendingAsActive: () => {
         const pending = get().pendingSetup;
         if (!pending || !pending.adjusted.accepted) return;
-
+        // FIX C6: Record ACTUAL trade emission for velocity control.
+        // This fires ONLY when the user confirms "I'm taking this trade",
+        // not when a signal is generated.
         const adj = pending.adjusted as any;
         if (adj.direction && typeof ScalpEngine !== 'undefined') {
-            (ScalpEngine as any).recordUserTradeEmission(adj.direction);
+            ScalpEngine.recordUserTradeEmission(adj.direction);
         }
         set({ activeSetup: pending, pendingSetup: null });
     },
@@ -189,6 +191,18 @@ export const useNexusStore = create<NexusState>((set, get) => ({
     markOutcome: (outcome, pnlPct) =>
         set((state) => {
             if (!state.activeSetup) return {};
+
+            // FIX C2: Push outcome back to ScalpEngine for velocity/PnL tracking
+            const adj = state.activeSetup.adjusted as any;
+            if (typeof ScalpEngine !== 'undefined') {
+                ScalpEngine.recordOutcome({
+                    type: adj.type || 'unknown',
+                    pnlPct: pnlPct,
+                    feesMarginPct: adj.feesMarginPct || 0,
+                    rrRealized: pnlPct / (adj.stopLossMarginPct || 1)
+                });
+            }
+
             const updated: SetupHistoryEntry = {
                 ...state.activeSetup,
                 outcome,
@@ -331,7 +345,7 @@ export const useScannerStore = create<ScannerState>()(
                             interval: 'Min1',
                             limit: 200,
                         });
-                        if (history && (history as any).length > 0) {
+                        if (history && history.length > 0) {
                             candleManager.setHistory(history);
                         }
                     } catch (e) {
