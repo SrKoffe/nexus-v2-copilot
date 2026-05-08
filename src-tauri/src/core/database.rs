@@ -140,11 +140,12 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT COUNT(*) as total,
                     SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins
-             FROM trade_history WHERE reason LIKE ?1 AND status = 'closed'"
+             FROM trade_history WHERE reason LIKE ?1 ESCAPE '\\' AND status = 'closed'"
         ).unwrap();
 
+        let escaped_reason = reason.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
         let result: (u32, u32) = stmt.query_row(
-            params![format!("%{}%", reason)],
+            params![format!("%{}%", escaped_reason)],
             |row| Ok((row.get(0)?, row.get::<_, Option<u32>>(1)?.unwrap_or(0))),
         ).unwrap_or((0, 0));
 
@@ -284,6 +285,24 @@ mod tests {
         assert_eq!(trades[0].symbol, "BTC-PERP");
         assert_eq!(trades[0].pnl, Some(100.0));
         assert_eq!(trades[0].status, "closed");
+    }
+
+    #[test]
+    fn test_win_rate_with_wildcards() {
+        let db = Database::new(":memory:").unwrap();
+
+        // One trade with reason containing exactly 100%
+        let id = db.record_trade_open("BTC-PERP", "long", 95000.0, 0.1, "100%_profit").unwrap();
+        db.record_trade_close(id, 96000.0, 100.0).unwrap();
+
+        // One trade with similar pattern but not exactly "100%"
+        let id = db.record_trade_open("BTC-PERP", "short", 95000.0, 0.1, "1000_profit").unwrap();
+        db.record_trade_close(id, 96000.0, -50.0).unwrap();
+
+        // The search should match only the literal "100%"
+        let (total, wins, _) = db.get_win_rate("100%");
+        assert_eq!(total, 1);
+        assert_eq!(wins, 1);
     }
 
     #[test]
