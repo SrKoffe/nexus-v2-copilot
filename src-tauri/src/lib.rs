@@ -12,6 +12,7 @@ pub mod engine;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tauri_plugin_fs::FsExt;
 use tauri::Manager;
 
 use core::database::Database;
@@ -223,8 +224,15 @@ fn query_setup_outcomes(
 /// Write a markdown report to a host file path. Used to drop weekly reports
 /// into the user's Obsidian vault (or any path they choose).
 #[tauri::command]
-fn write_report_to_vault(path: String, content: String) -> Result<String, String> {
+fn write_report_to_vault(app: tauri::AppHandle, path: String, content: String) -> Result<String, String> {
     let p = std::path::PathBuf::from(&path);
+
+    // Utilize Tauri's fs scope API to restrict write access and prevent Path Traversal
+    let scope = app.fs_scope();
+    if !scope.is_allowed(&p) {
+        return Err(format!("Path access denied by fs scope: {}", path));
+    }
+
     if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create dir {:?}: {}", parent, e))?;
@@ -269,6 +277,7 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
