@@ -101,6 +101,8 @@ export const ConfluenceEngine = {
             hasInstitutional
         );
 
+        const dimEntries = Object.entries(dimensions);
+
         // ─── Step 2: Resolve adaptive weights ───
         const weights = hasInstitutional
             ? this._resolveWeights(regime, regimeStrength, context)
@@ -108,28 +110,28 @@ export const ConfluenceEngine = {
 
         // ─── Step 3: Structural alignment gate ───
         const structuralAlignment = hasInstitutional
-            ? this._applyStructuralGate(dimensions, regime, marketState)
+            ? this._applyStructuralGate(dimEntries, regime, marketState)
             : { penalized: {}, mssOverride: false };
 
         // ─── Step 4: Noise suppression ───
         const suppressedDims = hasInstitutional
-            ? this._applyNoiseSuppression(dimensions, regime, marketState)
+            ? this._applyNoiseSuppression(dimensions, dimEntries, regime, marketState)
             : {};
 
         // ─── Step 5: Weighted combination ───
         let rawScore;
         if (hasInstitutional && weights) {
-            rawScore = this._weightedCombine(dimensions, weights);
+            rawScore = this._weightedCombine(dimEntries, weights);
         } else {
-            rawScore = this._legacyCombine(dimensions);
+            rawScore = this._legacyCombine(dimEntries);
         }
 
         // ─── Step 6: Non-linear rare alignment boost ───
-        const alignment = this._detectRareAlignment(dimensions);
+        const alignment = this._detectRareAlignment(dimEntries);
         const boostedScore = rawScore * alignment.boost;
 
         // ─── Step 7: Conflict penalty ───
-        const conflict = this._assessConflict(dimensions);
+        const conflict = this._assessConflict(dimEntries);
 
         // ─── Step 8: Context modifier ───
         let contextModifier = { multiplier: 1.0, reason: 'No context' };
@@ -182,11 +184,11 @@ export const ConfluenceEngine = {
         );
 
         // ─── Step 14: Reasoning ───
-        const reasoning = this._buildReasoning(dimensions, weights, alignment, conflict);
+        const reasoning = this._buildReasoning(dimensions, dimEntries, weights, alignment, conflict);
 
         // ─── Step 15: Adaptive learning feedback ───
         if (this._learning.enabled && hasInstitutional) {
-            this._recordPrediction(dimensions, signal);
+            this._recordPrediction(dimEntries, signal);
         }
 
         // ─── Build output (backward-compatible + enhanced) ───
@@ -203,7 +205,7 @@ export const ConfluenceEngine = {
             structuralAlignment,
             weights: hasInstitutional ? weights : this.legacyWeights,
             mode: hasInstitutional ? 'institutional' : 'legacy',
-            breakdown: this._getBreakdown(dimensions, hasInstitutional ? weights : this.legacyWeights),
+            breakdown: this._getBreakdown(dimEntries, hasInstitutional ? weights : this.legacyWeights),
 
             // Enhanced Confluence 2.0 fields
             riskScore,
@@ -712,7 +714,7 @@ export const ConfluenceEngine = {
     // STRUCTURAL ALIGNMENT GATE
     // ═══════════════════════════════════════════════════════════════════════
 
-    _applyStructuralGate(dimensions, regime, marketState) {
+    _applyStructuralGate(dimEntries, regime, marketState) {
         const penalized = {};
 
         const structDir = regime === 'trending_up' ? 1 : regime === 'trending_down' ? -1 : 0;
@@ -726,7 +728,7 @@ export const ConfluenceEngine = {
         const regimeConf = (marketState?.regime?.confidence || 50) / 100;
         const penaltyFactor = regimeConf > 0.70 ? 0.35 : 0.55;
 
-        for (const [dim, data] of Object.entries(dimensions)) {
+        for (const [dim, data] of dimEntries) {
             if (dim === 'structure' || !data.active) continue;
 
             const opposes = (structDir > 0 && data.score < -20) || (structDir < 0 && data.score > 20);
@@ -756,7 +758,7 @@ export const ConfluenceEngine = {
     // NOISE SUPPRESSION
     // ═══════════════════════════════════════════════════════════════════════
 
-    _applyNoiseSuppression(dimensions, regime, marketState) {
+    _applyNoiseSuppression(dimensions, dimEntries, regime, marketState) {
         const suppressed = {};
         const msScore = dimensions.structure?.score || 0;
         const threshold = 25;
@@ -778,7 +780,7 @@ export const ConfluenceEngine = {
             if (dimensions.volatility?.active && dimensions.volatility.score > 30)
                 suppress('volatility', 0.6, 'Counter-trend volatility suppressed in downtrend');
         } else if (regime === 'transition') {
-            for (const [dim, data] of Object.entries(dimensions)) {
+            for (const [dim, data] of dimEntries) {
                 if (dim === 'structure' || dim === 'volatility' || !data.active) continue;
                 if (Math.abs(data.score) > 50) {
                     suppress(dim, 0.7, `Aggressive ${dim} dampened in TRANSITION`);
@@ -803,10 +805,9 @@ export const ConfluenceEngine = {
     // WEIGHTED COMBINATION
     // ═══════════════════════════════════════════════════════════════════════
 
-    _weightedCombine(dimensions, weights) {
+    _weightedCombine(dimEntries, weights) {
         let sum = 0, totalW = 0;
-        for (const dim in dimensions) {
-            const data = dimensions[dim];
+        for (const [dim, data] of dimEntries) {
             if (!data.active || weights[dim] === undefined) continue;
             // Score scaled by dimension confidence
             const effectiveScore = data.score * (data.confidence / 100);
@@ -816,10 +817,9 @@ export const ConfluenceEngine = {
         return totalW > 0 ? (sum / totalW) : 0;
     },
 
-    _legacyCombine(dimensions) {
+    _legacyCombine(dimEntries) {
         let sum = 0, totalW = 0;
-        for (const dim in dimensions) {
-            const data = dimensions[dim];
+        for (const [dim, data] of dimEntries) {
             if (!data.active || this.legacyWeights[dim] === undefined) continue;
             sum += data.score * this.legacyWeights[dim];
             totalW += this.legacyWeights[dim];
@@ -832,8 +832,8 @@ export const ConfluenceEngine = {
     // Sigmoid: boost = 1 + 0.5 / (1 + e^(-(alignCount - 3.5)))
     // ═══════════════════════════════════════════════════════════════════════
 
-    _detectRareAlignment(dimensions) {
-        const activeDims = Object.entries(dimensions).filter(([, d]) => d.active && d.confidence > 50);
+    _detectRareAlignment(dimEntries) {
+        const activeDims = dimEntries.filter(([, d]) => d.active && d.confidence > 50);
 
         const bullishAligned = activeDims.filter(([, d]) => d.score > 20).length;
         const bearishAligned = activeDims.filter(([, d]) => d.score < -20).length;
@@ -863,8 +863,8 @@ export const ConfluenceEngine = {
     // impact = severity × 0.4
     // ═══════════════════════════════════════════════════════════════════════
 
-    _assessConflict(dimensions) {
-        const active = Object.entries(dimensions).filter(([, d]) => d.active);
+    _assessConflict(dimEntries) {
+        const active = dimEntries.filter(([, d]) => d.active);
 
         let bullStrength = 0, bearStrength = 0;
         let bullCount = 0, bearCount = 0;
@@ -998,7 +998,7 @@ export const ConfluenceEngine = {
     // REASONING SUMMARY
     // ═══════════════════════════════════════════════════════════════════════
 
-    _buildReasoning(dimensions, weights, alignment, conflict) {
+    _buildReasoning(dimensions, dimEntries, weights, alignment, conflict) {
         const labels = {
             structure: 'Structure', liquidity: 'Liquidity', volume: 'Volume',
             timeContext: 'Time Context', indicators: 'Indicators',
@@ -1006,7 +1006,7 @@ export const ConfluenceEngine = {
             trend: 'Trend', momentum: 'Momentum'
         };
 
-        const active = Object.entries(dimensions)
+        const active = dimEntries
             .filter(([, d]) => d.active)
             .map(([key, d]) => ({
                 factor: labels[key] || key,
@@ -1054,11 +1054,11 @@ export const ConfluenceEngine = {
     // Rolling 50-trade hit-rate per dimension
     // ═══════════════════════════════════════════════════════════════════════
 
-    _recordPrediction(dimensions, signal) {
+    _recordPrediction(dimEntries, signal) {
         if (signal === 'hold') return;
 
         const entry = { timestamp: Date.now(), signal };
-        for (const [dim, data] of Object.entries(dimensions)) {
+        for (const [dim, data] of dimEntries) {
             if (!data.active) continue;
             entry[dim] = {
                 prediction: data.score > 15 ? 'buy' : data.score < -15 ? 'sell' : 'hold',
@@ -1133,7 +1133,7 @@ export const ConfluenceEngine = {
         return { rawScore: 0, score: 0, confidence: 0, weight: 0, bias: 'neutral', contributors: 0, active: false };
     },
 
-    _getBreakdown(dimensions, weights) {
+    _getBreakdown(dimEntries, weights) {
         const labels = {
             structure: 'Structure', liquidity: 'Liquidity', volume: 'Volume',
             timeContext: 'Time Context', indicators: 'Indicators',
@@ -1142,7 +1142,7 @@ export const ConfluenceEngine = {
             volumeProfile: 'Volume Profile'
         };
 
-        return Object.entries(dimensions).map(([key, data]) => ({
+        return dimEntries.map(([key, data]) => ({
             name: labels[key] || key,
             score: data.score,
             active: data.active,
