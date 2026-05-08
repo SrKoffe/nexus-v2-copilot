@@ -169,9 +169,18 @@ export const ScalpEngine = {
 
         // Fallback to heatmap if AMT is completely broken
         if (!targetPrice) {
-            targetPrice = isLong 
-                ? heatmapNodes.find(n => n > cp) || (cp * 1.002) 
-                : [...heatmapNodes].reverse().find(n => n < cp) || (cp * 0.998);
+            if (isLong) {
+                targetPrice = heatmapNodes.find(n => n > cp) || (cp * 1.002);
+            } else {
+                let found = undefined;
+                for (let i = heatmapNodes.length - 1; i >= 0; i--) {
+                    if (heatmapNodes[i] < cp) {
+                        found = heatmapNodes[i];
+                        break;
+                    }
+                }
+                targetPrice = found || (cp * 0.998);
+            }
         }
 
         const slPrice = isLong ? cp * 0.998 : cp * 1.002;
