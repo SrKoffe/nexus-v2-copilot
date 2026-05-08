@@ -805,7 +805,8 @@ export const ConfluenceEngine = {
 
     _weightedCombine(dimensions, weights) {
         let sum = 0, totalW = 0;
-        for (const [dim, data] of Object.entries(dimensions)) {
+        for (const dim in dimensions) {
+            const data = dimensions[dim];
             if (!data.active || weights[dim] === undefined) continue;
             // Score scaled by dimension confidence
             const effectiveScore = data.score * (data.confidence / 100);
@@ -817,7 +818,8 @@ export const ConfluenceEngine = {
 
     _legacyCombine(dimensions) {
         let sum = 0, totalW = 0;
-        for (const [dim, data] of Object.entries(dimensions)) {
+        for (const dim in dimensions) {
+            const data = dimensions[dim];
             if (!data.active || this.legacyWeights[dim] === undefined) continue;
             sum += data.score * this.legacyWeights[dim];
             totalW += this.legacyWeights[dim];
