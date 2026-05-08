@@ -369,8 +369,6 @@ export const LeverageAdjustedRiskEngine = {
         const takeProfit2 = setup.entryPrice * (1 - dirSign * (tp2PricePct / 100));
 
         // ─── 9. Position sizing ───
-        // FIX H6: positionSizeUsd = MARGIN used, not notional.
-        // riskAmountUsd / (slFinalPct / 100) = notional → divide by leverage for margin.
         const riskAmountUsd = balanceUsd * config.riskPerTrade;
         const notionalFromRisk = (riskAmountUsd / slFinalPct) * 100;
         const positionSizeUsd = notionalFromRisk / leverage; // margin = notional / leverage
