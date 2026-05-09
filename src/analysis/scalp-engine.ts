@@ -88,7 +88,10 @@ export const ScalpEngine = {
         lastVolatilityScore: 0,
         currentLeverage: 10,
         isLiveSimActive: false,
-        recentTradeTimestamps: []
+        // v4.0: Operating Mode & Velocity
+        currentMode: 'swing_scalp',
+        recentTradeTimestamps: [],
+        velocityReduction: 1.0
     },
 
 
@@ -109,6 +112,8 @@ export const ScalpEngine = {
 
     _performance: {
         history: [],
+        netPnl: 0,
+        totalFeesPaid: 0,
         // v3.0: Only 5 institutional setup types tracked
         byType: {
             liquidity_sweep_reversal: { wins: 0, losses: 0, totalRR: 0, count: 0 },
@@ -137,6 +142,59 @@ export const ScalpEngine = {
             StateCache.set('currentLeverage', this._state.currentLeverage);
         }
         console.log(`[ScalpEngine] Leverage set to ${this._state.currentLeverage}x.`);
+    },
+
+    /**
+     * Records an actual trade emission (user took the trade).
+     * v4.0: Used for velocity control and operating mode transitions.
+     */
+    recordUserTradeEmission(direction: string) {
+        this._state.recentTradeTimestamps.push(Date.now());
+        this._updateVelocityState();
+
+        // Force an immediate store sync via EventBus
+        EventBus.emit('ANALYSIS_SIGNAL', {
+            type: 'VELOCITY_UPDATE',
+            probability: 0,
+            direction: 'neutral'
+        });
+
+        console.log(`[ScalpEngine] Trade recorded (${direction}). TPM: ${this._state.recentTradeTimestamps.length}. Mode: ${this._state.currentMode}`);
+    },
+
+    _updateVelocityState() {
+        const now = Date.now();
+        // Filter for last 60 seconds
+        this._state.recentTradeTimestamps = this._state.recentTradeTimestamps.filter(t => now - t < 60000);
+
+        const tpm = this._state.recentTradeTimestamps.length;
+
+        // Mode & Reduction logic (v4.0)
+        if (tpm > 3) {
+            this._state.currentMode = 'micro_scalp';
+            this._state.velocityReduction = 0.5;
+        } else if (tpm > 1) {
+            this._state.currentMode = 'hybrid';
+            this._state.velocityReduction = 0.8;
+        } else {
+            this._state.currentMode = 'swing_scalp';
+            this._state.velocityReduction = 1.0;
+        }
+    },
+
+    _getEngineState() {
+        // Recalculate velocity state before returning to ensure data is never stale
+        this._updateVelocityState();
+
+        return {
+            operatingMode: this._state.currentMode,
+            velocityState: {
+                tradesPerMinute: this._state.recentTradeTimestamps.length,
+                sizeReduction: this._state.velocityReduction,
+            },
+            netPnlSession: this._performance.netPnl ?? 0,
+            totalFeesSession: this._performance.totalFeesPaid ?? 0,
+        };
     },
 
     init() {
@@ -170,18 +228,9 @@ export const ScalpEngine = {
 
         // Fallback to heatmap if AMT is completely broken
         if (!targetPrice) {
-            if (isLong) {
-                targetPrice = heatmapNodes.find(n => n > cp) || (cp * 1.002);
-            } else {
-                let found = undefined;
-                for (let i = heatmapNodes.length - 1; i >= 0; i--) {
-                    if (heatmapNodes[i] < cp) {
-                        found = heatmapNodes[i];
-                        break;
-                    }
-                }
-                targetPrice = found || (cp * 0.998);
-            }
+            targetPrice = isLong
+                ? heatmapNodes.find(n => n > cp) || (cp * 1.002)
+                : [...heatmapNodes].reverse().find(n => n < cp) || (cp * 0.998);
         }
 
         const slPrice = isLong ? cp * 0.998 : cp * 1.002;
@@ -251,7 +300,11 @@ export const ScalpEngine = {
             pnlPct: null
         });
         
-        EventBus.emit('SCALP_SETUP', finalSetup);
+        // FIX C1: Include full engine state for the Zustand sync bridge
+        EventBus.emit('SCALP_SETUP', {
+            ...finalSetup,
+            _engineState: this._getEngineState()
+        });
     },
 
     /**
@@ -448,7 +501,8 @@ export const ScalpEngine = {
             riskState: this._getRiskState(),
             eventSource: eventType,
             latencyMs: this._state.lastLatencyMs,
-            volatilityScore: volScore
+            volatilityScore: volScore,
+            _engineState: this._getEngineState()
         };
     },
 
@@ -459,6 +513,11 @@ export const ScalpEngine = {
     recordOutcome(result) {
         if (!result || !result.type) return;
         const isWin = (result.pnlPct || 0) > 0;
+
+        // v4.0: Track session performance for the sync bridge
+        this._performance.netPnl += result.pnlPct || 0;
+        this._performance.totalFeesPaid += result.feesMarginPct || 0;
+
         const bucket = this._performance.byType[result.type];
         if (bucket) {
             bucket.count++;
@@ -481,19 +540,14 @@ export const ScalpEngine = {
             }
         }
         this._selfTune();
-    },
 
-    recordUserTradeEmission(direction: string) {
-        if (!this._state.recentTradeTimestamps) {
-            this._state.recentTradeTimestamps = [];
-        }
-        const now = Date.now();
-        this._state.recentTradeTimestamps.push(now);
-        // Keep only timestamps from the last 60 seconds
-        this._state.recentTradeTimestamps = this._state.recentTradeTimestamps.filter(t => now - t < 60000);
-        console.log(`[ScalpEngine] User trade recorded (${direction}). TPM: ${this._state.recentTradeTimestamps.length}`);
+        // v4.0: Trigger immediate store sync after outcome recording
+        EventBus.emit('ANALYSIS_SIGNAL', {
+            type: 'OUTCOME_SYNC',
+            probability: 0,
+            direction: 'neutral'
+        });
     },
-
 
     getStatus() {
         return {
@@ -545,7 +599,8 @@ export const ScalpEngine = {
                             EventBus.emit(E.SCALP_SETUP, {
                                 setup: result.bestSetup,
                                 eventSource: result.eventSource,
-                                latencyMs: result.latencyMs
+                                latencyMs: result.latencyMs,
+                                _engineState: result._engineState
                             });
                         }
                     } catch (e) {

@@ -38,98 +38,81 @@ const DECISION_STYLE: Record<string, { bg: string; border: string; color: string
     'NO TRADE': { bg: 'rgba(255,51,102,0.06)', border: '#ff3366', color: '#ff3366' },
 };
 
-function buildChecklist(): ChecklistState {
-    const store = useNexusStore.getState();
-    const lev = store.leverage;
-    const mode = store.operatingMode || 'swing_scalp';
-    const pending = store.pendingSetup;
-    const velocity = store.velocityState;
-    const marketRegime = store.currentRegime;
-    const marketRegimeConf = store.regimeConfidence;
-
-    if (!pending || !pending.adjusted.accepted) {
-        return { direction: 'NONE', mode, confidence: 0, score: 0, items: [], decision: 'NO TRADE' };
-    }
-
-    const adj = pending.adjusted as any;
-    const direction: 'LONG' | 'SHORT' = adj.direction === 'long' ? 'LONG' : 'SHORT';
-    const confidence = adj.confidence || 0;
-
-    // Build individual checks
-    const items: CheckItem[] = [];
-
-    // 0. Regime check (v5.1 — Level 0 of pipeline)
+function checkMarketRegime(marketRegime: string, marketRegimeConf: number, direction: 'LONG' | 'SHORT'): CheckItem {
     if (marketRegime === 'chaotic') {
-        items.push({
+        return {
             label: 'Market Regime',
             status: 'fail',
             explanation: `CHAOTIC regime — block trade. Confidence ${(marketRegimeConf * 100).toFixed(0)}%.`,
-        });
+        };
     } else if (marketRegime === 'trend_up' && direction === 'SHORT') {
-        items.push({
+        return {
             label: 'Market Regime',
             status: 'warning',
             explanation: `Going SHORT against TREND_UP — counter-trend, only with strong reversal signal`,
-        });
+        };
     } else if (marketRegime === 'trend_down' && direction === 'LONG') {
-        items.push({
+        return {
             label: 'Market Regime',
             status: 'warning',
             explanation: `Going LONG against TREND_DOWN — counter-trend, requires strong reversal`,
-        });
+        };
     } else if (marketRegime === 'transition') {
-        items.push({
+        return {
             label: 'Market Regime',
             status: 'warning',
             explanation: `TRANSITION — no clear regime yet, expect lower edge`,
-        });
+        };
     } else {
-        items.push({
+        return {
             label: 'Market Regime',
             status: 'pass',
             explanation: `${marketRegime.replace('_', ' ').toUpperCase()} aligned with ${direction} (${(marketRegimeConf * 100).toFixed(0)}%)`,
-        });
+        };
     }
+}
 
-    // 1. Signal triggered
-    const fusionScore = adj.confidence * 100;
+function checkSignalTriggered(confidence: number, mode: string): CheckItem {
+    const fusionScore = confidence * 100;
     const threshold = mode === 'micro_scalp' ? 50 : mode === 'hybrid' ? 55 : 65;
-    items.push({
+    return {
         label: 'Signal Triggered',
         status: fusionScore >= threshold ? 'pass' : fusionScore >= threshold * 0.85 ? 'warning' : 'fail',
         explanation: `Score ${fusionScore.toFixed(0)}% ${fusionScore >= threshold ? '≥' : '<'} ${threshold}% (${mode})`,
-    });
+    };
+}
 
-    // 2. Profit gate
-    const feePct = (store.takerFeePct || 0.04) * 2 * lev;
-    const tp1Net = adj.takeProfit1MarginNet ?? 0;
-    items.push({
+function checkProfitGate(takerFeePct: number, lev: number, tp1Net: number): CheckItem {
+    const feePct = takerFeePct * 2 * lev;
+    return {
         label: 'Profit Gate',
         status: tp1Net > feePct * 0.5 ? 'pass' : tp1Net > 0 ? 'warning' : 'fail',
         explanation: tp1Net > 0
             ? `TP1 net +${tp1Net.toFixed(1)}% > fees ${feePct.toFixed(1)}%`
             : `Expected PnL doesn't cover fees (${feePct.toFixed(1)}%)`,
-    });
+    };
+}
 
-    // 3. Velocity
-    const tpm = velocity?.tradesPerMinute ?? 0;
+function checkVelocity(tpm: number, mode: string): CheckItem {
     const maxTpm = mode === 'micro_scalp' ? 5 : mode === 'hybrid' ? 2 : 1;
-    items.push({
+    return {
         label: 'Velocity OK',
         status: tpm < maxTpm ? 'pass' : tpm < maxTpm * 2 ? 'warning' : 'fail',
         explanation: `${tpm}/${maxTpm} trades/min${tpm >= maxTpm ? ' — throttling active' : ''}`,
-    });
+    };
+}
 
-    // 4. Direction bias (stickiness)
+function checkDirectionBias(direction: 'LONG' | 'SHORT', adjDirection: string): CheckItem {
     const lastDir = StateCache.get('lastTradeDirection', null);
-    const sameDir = !lastDir || (lastDir === adj.direction);
-    items.push({
+    const sameDir = !lastDir || (lastDir === adjDirection);
+    return {
         label: 'Direction Bias',
         status: sameDir ? 'pass' : 'warning',
         explanation: sameDir ? `Aligned with ${direction} bias` : `Direction flip from ${lastDir?.toUpperCase()} — needs strong reversal`,
-    });
+    };
+}
 
-    // 5. Context condition
+function checkContextCondition(direction: 'LONG' | 'SHORT'): CheckItem {
     const poc = StateCache.get('currentPOC', 0) || StateCache.get('poc', 0);
     const vah = StateCache.get('currentVAH', 0) || StateCache.get('vah', 0);
     const val = StateCache.get('currentVAL', 0) || StateCache.get('val', 0);
@@ -147,23 +130,25 @@ function buildChecklist(): ChecklistState {
         ctxExplain = direction === 'LONG' ? 'Below VAL — long bias ✓' : 'Below VAL — short against profile';
         ctxStatus = direction === 'LONG' ? 'pass' : 'warning';
     }
-    items.push({ label: 'Context Condition', status: ctxStatus, explanation: ctxExplain });
+    return { label: 'Context Condition', status: ctxStatus, explanation: ctxExplain };
+}
 
-    // 6. Absorption confirmation
+function checkAbsorption(direction: 'LONG' | 'SHORT'): CheckItem {
     const absorption = StateCache.get('lastAbsorption', null);
     if (absorption?.detected) {
         const absAligned = (direction === 'LONG' && absorption.mostRecent?.direction === 'selling_absorbed') ||
                           (direction === 'SHORT' && absorption.mostRecent?.direction === 'buying_absorbed');
-        items.push({
+        return {
             label: 'Absorption',
             status: absAligned ? 'pass' : 'warning',
             explanation: absAligned ? `${absorption.mostRecent?.direction} — confirms ${direction}` : 'Absorption opposes trade direction',
-        });
+        };
     } else {
-        items.push({ label: 'Absorption', status: 'warning', explanation: 'No absorption detected' });
+        return { label: 'Absorption', status: 'warning', explanation: 'No absorption detected' };
     }
+}
 
-    // 7. OBI divergence check
+function checkOBIDivergence(): CheckItem {
     const obi = StateCache.get('aggressiveImbalance', null);
     const bookObi = StateCache.get('bookImbalance', null);
     let obiStatus: CheckStatus = 'pass';
@@ -178,25 +163,55 @@ function buildChecklist(): ChecklistState {
             obiExplain = `Trade + Book aligned: ${tradeDir}`;
         }
     }
-    items.push({ label: 'OBI Divergence', status: obiStatus, explanation: obiExplain });
+    return { label: 'OBI Divergence', status: obiStatus, explanation: obiExplain };
+}
 
-    // 8. Liquidity Target (v5.2e)
-    const liqUsed = adj.tp1LiquidityUsed ?? false;
-    const liqSource = adj.tp1LiquiditySource ?? null;
-    const liqConf = adj.tp1LiquidityConfidence ?? 0;
+function checkLiquidityTarget(liqUsed: boolean, liqSource: string | null, liqConf: number): CheckItem {
     if (liqUsed && liqSource) {
-        items.push({
+        return {
             label: 'Liquidity Target',
             status: liqConf >= 0.5 ? 'pass' : 'warning',
             explanation: `TP1 backed by ${liqSource} (${(liqConf * 100).toFixed(0)}% confidence)`,
-        });
+        };
     } else {
-        items.push({
+        return {
             label: 'Liquidity Target',
             status: 'warning',
             explanation: 'No structural liquidity node — TP from margin-PnL model',
-        });
+        };
     }
+}
+
+function buildChecklist(): ChecklistState {
+    const store = useNexusStore.getState();
+    const lev = store.leverage;
+    const mode = store.operatingMode || 'swing_scalp';
+    const pending = store.pendingSetup;
+    const velocity = store.velocityState;
+    const marketRegime = store.currentRegime;
+    const marketRegimeConf = store.regimeConfidence;
+
+    if (!pending || !pending.adjusted.accepted) {
+        return { direction: 'NONE', mode, confidence: 0, score: 0, items: [], decision: 'NO TRADE' };
+    }
+
+    const adj = pending.adjusted as any;
+    const direction: 'LONG' | 'SHORT' = adj.direction === 'long' ? 'LONG' : 'SHORT';
+    const confidence = adj.confidence || 0;
+    const fusionScore = confidence * 100;
+
+    // Build individual checks
+    const items: CheckItem[] = [
+        checkMarketRegime(marketRegime, marketRegimeConf, direction),
+        checkSignalTriggered(confidence, mode),
+        checkProfitGate(store.takerFeePct || 0.04, lev, adj.takeProfit1MarginNet ?? 0),
+        checkVelocity(velocity?.tradesPerMinute ?? 0, mode),
+        checkDirectionBias(direction, adj.direction),
+        checkContextCondition(direction),
+        checkAbsorption(direction),
+        checkOBIDivergence(),
+        checkLiquidityTarget(adj.tp1LiquidityUsed ?? false, adj.tp1LiquiditySource ?? null, adj.tp1LiquidityConfidence ?? 0)
+    ];
 
     // Compute decision
     const fails = items.filter(i => i.status === 'fail').length;
