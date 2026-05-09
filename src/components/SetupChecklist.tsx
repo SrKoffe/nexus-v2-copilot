@@ -278,7 +278,7 @@ export const SetupChecklist: React.FC = () => {
                 {state.items.map((item, i) => (
                     <div key={i} style={{
                         display: 'flex', alignItems: 'flex-start', gap: '8px',
-                        padding: '6px 8px', borderRadius: '4px',
+                        padding: '6px 8px', borderRadius: '2px',
                         background: item.status === 'fail' ? 'rgba(255,51,102,0.05)' : 'rgba(255,255,255,0.02)',
                         borderLeft: `2px solid ${STATUS_COLOR[item.status]}`,
                     }}>
@@ -295,8 +295,8 @@ export const SetupChecklist: React.FC = () => {
 
             {/* Decision badge */}
             <div style={{
-                textAlign: 'center', padding: '8px 12px', borderRadius: '6px',
-                background: ds.bg, border: `1px solid ${ds.border}`,
+                textAlign: 'center', padding: '8px 12px', borderRadius: '2px',
+                background: 'transparent', border: `1px solid ${ds.border}`,
                 color: ds.color, fontWeight: 'bold', fontSize: '13px', letterSpacing: '1px',
             }}>
                 {state.decision}

@@ -14,7 +14,7 @@ export function HUDHeader({ livePrice }: { livePrice: number }) {
     const modeColor = operatingMode === 'micro_scalp' ? '#ff3366' : operatingMode === 'hybrid' ? '#ffb800' : '#00e1ff';
 
     return (
-        <header className="hud-topbar panel">
+        <header className="terminal-topbar">
             <div className="brand">
                 <span className="text-blue mono">▶</span> NEXUS <span className="text-secondary text-sm">V2 / CO-PILOT</span>
             </div>

@@ -70,14 +70,14 @@ export const SetupStrengthMeter: React.FC = () => {
 
             {/* Progress bar */}
             <div style={{
-                height: '6px', borderRadius: '3px',
+                height: '6px', borderRadius: '2px',
                 background: 'rgba(255,255,255,0.06)',
                 overflow: 'hidden',
             }}>
                 <div style={{
                     width: `${strength.score}%`,
                     height: '100%',
-                    borderRadius: '3px',
+                    borderRadius: '2px',
                     background: `linear-gradient(90deg, ${strength.color}88, ${strength.color})`,
                     transition: 'width 0.4s ease, background 0.4s ease',
                     boxShadow: `0 0 8px ${strength.color}44`,
@@ -170,8 +170,8 @@ export const MarketDifficultyIndicator: React.FC = () => {
                 <span style={{ fontSize: '10px', color: '#8892b0', fontWeight: 600 }}>DIFFICULTY</span>
                 <span className="mono" style={{
                     fontSize: '12px', fontWeight: 700, color: diff.color,
-                    padding: '1px 6px', borderRadius: '3px',
-                    background: `${diff.color}15`, border: `1px solid ${diff.color}30`,
+                    padding: '1px 6px', borderRadius: '2px',
+                    background: 'transparent', border: 'none',
                 }}>
                     {diff.mode}
                 </span>
