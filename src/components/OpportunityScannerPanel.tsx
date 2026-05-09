@@ -15,9 +15,8 @@ export const OpportunityScannerPanel: React.FC = () => {
     if (topCandidates.length === 0) {
         return (
             <div className="panel" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <div className="panel-header">🔥 TOP OPPORTUNITIES</div>
                 <div className="panel-content" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <span className="text-secondary text-sm">Scanning market...</span>
+                    <span className="text-secondary text-sm">Hunting for opportunities...</span>
                 </div>
             </div>
         );
