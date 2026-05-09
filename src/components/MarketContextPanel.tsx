@@ -160,8 +160,8 @@ export const MarketContextPanel: React.FC = () => {
 
             {/* Recommendation */}
             <div style={{
-                marginTop: 'auto', padding: '8px 10px', borderRadius: '4px',
-                background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)',
+                marginTop: 'auto', padding: '8px 10px', borderRadius: '2px',
+                background: 'transparent', border: 'none',
                 fontSize: '11px', color: '#ddd', lineHeight: '1.4',
             }}>
                 {ctx.recommendation}
@@ -172,8 +172,8 @@ export const MarketContextPanel: React.FC = () => {
 
 const Badge: React.FC<{ label: string; color: string }> = ({ label, color }) => (
     <span style={{
-        padding: '2px 8px', borderRadius: '3px', fontSize: '10px', fontWeight: 700,
-        background: `${color}15`, border: `1px solid ${color}40`, color, letterSpacing: '0.5px',
+        padding: '2px 8px', borderRadius: '2px', fontSize: '10px', fontWeight: 700,
+        background: 'transparent', border: `1px solid ${color}20`, color, letterSpacing: '0.5px',
     }}>
         {label}
     </span>

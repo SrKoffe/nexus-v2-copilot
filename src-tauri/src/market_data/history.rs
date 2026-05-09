@@ -28,7 +28,7 @@ use super::types::Kline;
 /// ```
 fn build_mexc_kline_url(symbol: &str, interval: &str) -> Result<reqwest::Url, String> {
     let mexc_interval = normalize_interval(interval);
-    let mut url = reqwest::Url::parse("https://contract.mexc.com/api/v1/contract/kline/")
+    let mut url = reqwest::Url::parse("https://contract.mexc.com/api/v1/contract/kline")
         .map_err(|e| format!("Internal URL parse error: {}", e))?;
 
     {
@@ -79,7 +79,7 @@ pub async fn fetch_mexc_klines(symbol: &str, interval: &str, limit: u32) -> Resu
     let n = times.len().min(opens.len()).min(closes.len()).min(highs.len()).min(lows.len()).min(vols.len());
 
     // Compute interval ms for close_time (open_time + interval - 1ms)
-    let interval_ms = interval_to_ms(&mexc_interval);
+    let interval_ms = interval_to_ms(interval);
 
     let mut klines: Vec<Kline> = Vec::with_capacity(n);
     for i in 0..n {

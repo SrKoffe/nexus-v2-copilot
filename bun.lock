@@ -4,7 +4,7 @@
     "": {
       "name": "nexus-v2-copilot",
       "dependencies": {
-        "@tauri-apps/api": "^2",
+        "@tauri-apps/api": "^2.11.0",
         "@tauri-apps/plugin-opener": "^2",
         "lightweight-charts": "^5.1.0",
         "lucide-react": "^1.0.1",

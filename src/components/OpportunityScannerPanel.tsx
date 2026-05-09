@@ -63,7 +63,7 @@ export const OpportunityScannerPanel: React.FC = () => {
 
     return (
         <div className="panel" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div className="panel-header" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px' }}>
+            <div className="panel-header" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px 4px' }}>
                 {/* Search Bar */}
                 <input 
                     type="text" 
@@ -139,16 +139,16 @@ export const OpportunityScannerPanel: React.FC = () => {
                                 key={candidate.symbol}
                                 onClick={() => setActiveSymbol(candidate.symbol)}
                                 style={{
-                                    padding: '10px',
-                                    borderRadius: '6px',
+                                    padding: '8px 4px',
+                                    borderRadius: '2px',
                                     background: isActive ? 'rgba(0, 225, 255, 0.1)' : 'rgba(255, 255, 255, 0.02)',
-                                    border: `1px solid ${isActive ? 'rgba(0, 225, 255, 0.3)' : 'rgba(255, 255, 255, 0.05)'}`,
+                                    borderBottom: '1px solid rgba(255,255,255,0.05)',
                                     cursor: 'pointer',
                                     display: 'flex',
                                     flexDirection: 'column',
                                     gap: '6px',
                                     transition: 'all 0.2s ease',
-                                    boxShadow: isActive ? '0 0 10px rgba(0, 225, 255, 0.1)' : 'none'
+                                    boxShadow: 'none'
                                 }}
                             >
                                 {/* Top Row */}

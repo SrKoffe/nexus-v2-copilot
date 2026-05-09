@@ -5,7 +5,7 @@ import { EventBus } from '../analysis/event-bus';
 export const LiveFeed: React.FC = () => {
     const [logs, setLogs] = useState<{ id: number, text: string, type: string }[]>([
         { id: 2, text: "Hunting for institutional liquidity sweeps...", type: "sys" },
-        { id: 1, text: "Antigravity OS v2 terminal initialized.", type: "sys" }
+        { id: 1, text: "Terminal initialized.", type: "sys" }
     ]);
 
     useEffect(() => {
@@ -36,7 +36,7 @@ export const LiveFeed: React.FC = () => {
     }, []);
 
     return (
-        <div className="live-feed-inner mono text-xs" style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+        <div className="live-feed-inner mono text-xs" style={{ height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             {logs.map(log => {
                 let color = '#8892b0';
                 if (log.type === 'buy' || log.type === 'long') color = '#00ff88';
@@ -44,10 +44,25 @@ export const LiveFeed: React.FC = () => {
                 if (log.type === 'warn') color = '#ffd700';
 
                 return (
-                    <div key={log.id} style={{ marginBottom: '6px', borderLeft: `2px solid ${color}`, paddingLeft: '8px', background: 'rgba(255,255,255,0.02)' }}>
-                        <span style={{ color: '#555' }}>[{new Date(log.id).toLocaleTimeString()}]</span>{' '}
-                        <span style={{ color: '#0099ff' }}>[{log.type.toUpperCase()}]</span>{' '}
-                        <span style={{ color }}>{log.text}</span>
+                    <div key={log.id} style={{
+                        display: 'flex',
+                        gap: '12px',
+                        padding: '4px 8px',
+                        borderBottom: '1px solid rgba(255,255,255,0.02)',
+                        transition: 'background 0.1s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    >
+                        <span style={{ color: '#555', flexShrink: 0, width: '70px' }}>
+                            {new Date(log.id).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </span>
+                        <span style={{ color: color, flexShrink: 0, width: '40px', fontWeight: 600 }}>
+                            {log.type.toUpperCase().substring(0, 4)}
+                        </span>
+                        <span style={{ color: '#ccc', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {log.text}
+                        </span>
                     </div>
                 );
             })}

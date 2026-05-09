@@ -53,7 +53,7 @@ export const HUD: React.FC = () => {
                 {stages.map(stage => (
                     <div key={stage.num} className="led-step">
                         <div 
-                            className={`led-bulb ${getLedClass(stage.num)}`} 
+                            className={`terminal-led ${getLedClass(stage.num)}`}
                             style={{ backgroundColor: getLedColor(stage.num), boxShadow: `0 0 10px ${getLedColor(stage.num)}50` }} 
                         />
                         <span className="mono text-xs text-secondary" style={{ textAlign: 'center', fontSize: '10px' }}>{stage.label}</span>
@@ -68,7 +68,7 @@ export const HUD: React.FC = () => {
                         {pipelineReason}
                     </span>
                 ) : (
-                    <span className="text-secondary">Waiting for volatility spike...</span>
+                    <span className="text-secondary">Scanning entire market liquidity matrix...</span>
                 )}
             </div>
         </div>

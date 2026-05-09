@@ -44,9 +44,9 @@ export const SetupCard: React.FC = () => {
 
     return (
         <div style={{
-            background: 'rgba(10,15,25,0.6)',
-            border: `1px solid ${color}50`,
-            borderRadius: '8px',
+            background: 'transparent',
+            borderTop: `2px solid ${color}`,
+            borderRadius: '2px',
             padding: '16px',
             display: 'flex',
             flexDirection: 'column',
@@ -63,7 +63,7 @@ export const SetupCard: React.FC = () => {
                         color: tierColor,
                         border: `1px solid ${tierColor}66`,
                         padding: '2px 8px',
-                        borderRadius: '4px',
+                        borderRadius: '2px',
                         fontSize: '12px',
                         fontWeight: 'bold',
                         marginLeft: '8px'
@@ -71,18 +71,18 @@ export const SetupCard: React.FC = () => {
                         Tier {tier}
                     </span>
                 </div>
-                <span className="mono text-xs" style={{ background: `${color}20`, padding: '4px 8px', borderRadius: '4px', color }}>
+                <span className="mono text-xs" style={{ background: `${color}20`, padding: '4px 8px', borderRadius: '2px', color }}>
                     CONF: {(setup.confidence * 100).toFixed(0)}% · {setup.leverage}x
                 </span>
             </div>
 
             {/* Entry / Target / Stop — 3-col grid */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
-                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '4px' }}>
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '2px' }}>
                     <div className="text-secondary mono text-xs">ENTRY</div>
                     <div className="mono text-md" style={{ color: '#fff' }}>${setup.entryPrice.toFixed(1)}</div>
                 </div>
-                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '4px' }}>
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '2px' }}>
                     <div className="text-secondary mono text-xs" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                         TARGET (TP1 50%)
                         {setup.tp1LiquidityUsed && (
@@ -104,7 +104,7 @@ export const SetupCard: React.FC = () => {
                         +{setup.takeProfit1Pct.toFixed(3)}% · +{typeof setup.takeProfit1MarginNet === 'number' ? setup.takeProfit1MarginNet.toFixed(1) : setup.takeProfit1MarginNet}% margem net
                     </div>
                 </div>
-                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '4px' }}>
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '2px' }}>
                     <div className="text-secondary mono text-xs">STOP LOSS</div>
                     <div className="mono text-md" style={{ color: '#ff3366' }}>${setup.stopLoss.toFixed(1)}</div>
                     <div className="mono text-xs" style={{ color: '#ff3366' }}>
@@ -119,9 +119,9 @@ export const SetupCard: React.FC = () => {
                 gridTemplateColumns: '1fr 1fr 1fr 1fr',
                 gap: '8px',
                 padding: '10px',
-                background: 'rgba(0,0,0,0.25)',
-                border: '1px solid rgba(255,255,255,0.04)',
-                borderRadius: '4px',
+                background: 'transparent',
+                border: 'none',
+                borderRadius: '2px',
             }}>
                 <Stat
                     label="P(hit)"
@@ -152,9 +152,9 @@ export const SetupCard: React.FC = () => {
             {/* Probability explanation tooltip-like row */}
             {setup.evExplanation && (
                 <div style={{
-                    background: 'rgba(0, 225, 255, 0.04)',
+                    background: 'transparent',
                     border: '1px solid rgba(0, 225, 255, 0.15)',
-                    borderRadius: '4px',
+                    borderRadius: '2px',
                     padding: '6px 10px',
                     fontSize: '10px',
                     color: '#88ccdd',
@@ -169,7 +169,7 @@ export const SetupCard: React.FC = () => {
                 <div style={{
                     background: 'rgba(0, 225, 255, 0.06)',
                     border: '1px solid rgba(0, 225, 255, 0.20)',
-                    borderRadius: '4px',
+                    borderRadius: '2px',
                     padding: '6px 10px',
                     fontSize: '10px',
                     color: '#99ddee',
@@ -196,7 +196,7 @@ export const SetupCard: React.FC = () => {
                 <div style={{
                     background: 'rgba(255, 170, 0, 0.04)',
                     border: '1px solid rgba(255, 170, 0, 0.10)',
-                    borderRadius: '4px',
+                    borderRadius: '2px',
                     padding: '5px 10px',
                     fontSize: '9px',
                     color: '#998866',
@@ -211,7 +211,7 @@ export const SetupCard: React.FC = () => {
                 <div style={{
                     background: 'rgba(255, 170, 0, 0.06)',
                     border: '1px solid rgba(255, 170, 0, 0.25)',
-                    borderRadius: '4px',
+                    borderRadius: '2px',
                     padding: '6px 10px',
                     fontSize: '10px',
                     color: '#ffcc55',
@@ -242,7 +242,7 @@ export const SetupCard: React.FC = () => {
                     color,
                     border: `1px solid ${color}`,
                     padding: '10px',
-                    borderRadius: '6px',
+                    borderRadius: '2px',
                     cursor: 'pointer',
                     fontWeight: 'bold',
                     fontFamily: 'JetBrains Mono, monospace',
@@ -318,9 +318,9 @@ const ActiveIdleView: React.FC<{
                 flexDirection: 'column',
                 gap: '8px',
                 padding: '10px 12px',
-                background: 'rgba(0, 225, 255, 0.04)',
-                border: '1px solid rgba(0, 225, 255, 0.12)',
-                borderRadius: '6px',
+                background: 'transparent',
+                border: 'none',
+                borderRadius: '2px',
                 fontSize: '11px',
             }}>
                 <div style={{ color: '#00e1ff' }}>{topCandidates.filter(t => t.opportunity_score > 20).length} liquidity imbalances detected</div>
@@ -334,9 +334,9 @@ const ActiveIdleView: React.FC<{
                     fontSize: '10px',
                     color: '#666',
                     padding: '8px 12px',
-                    background: 'rgba(0,0,0,0.25)',
-                    borderRadius: '4px',
-                    border: '1px solid rgba(255,255,255,0.04)',
+                    background: 'transparent',
+                    borderRadius: '2px',
+                    border: 'none',
                 }}>
                     <span style={{ color: '#888', letterSpacing: '0.5px' }}>TOP 3 ·</span>{' '}
                     {topCandidates.slice(0, 3).map((c, i) => (
@@ -384,7 +384,7 @@ const RejectedView: React.FC<{ rejected: RejectedSetup; naturalSymbol: string }>
             gap: '10px',
             background: 'rgba(10,15,25,0.4)',
             border: '1px solid rgba(255, 68, 68, 0.2)',
-            borderRadius: '8px',
+            borderRadius: '2px',
         }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span className="mono" style={{ fontSize: '14px', color: '#888' }}>{naturalSymbol}</span>
@@ -392,7 +392,7 @@ const RejectedView: React.FC<{ rejected: RejectedSetup; naturalSymbol: string }>
                     background: 'rgba(255, 68, 68, 0.1)',
                     color: '#ff7777',
                     padding: '3px 8px',
-                    borderRadius: '4px',
+                    borderRadius: '2px',
                     fontSize: '10px',
                     fontWeight: 'bold',
                     letterSpacing: '0.5px',
@@ -404,7 +404,7 @@ const RejectedView: React.FC<{ rejected: RejectedSetup; naturalSymbol: string }>
             <div style={{
                 background: 'rgba(255, 68, 68, 0.04)',
                 border: '1px solid rgba(255, 68, 68, 0.15)',
-                borderRadius: '6px',
+                borderRadius: '2px',
                 padding: '10px',
                 fontSize: '11px',
                 color: '#aaa',
