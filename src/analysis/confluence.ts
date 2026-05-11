@@ -841,11 +841,11 @@ export const ConfluenceEngine = {
         const alignCount = Math.max(bullishAligned, bearishAligned);
         const direction = bullishAligned >= bearishAligned ? 'bullish' : 'bearish';
 
-        // Sigmoid boost: meaningful kick starts at 4 aligned dimensions
-        const sigmoid = 1 / (1 + Math.exp(-(alignCount - 3.5)));
+        // Sigmoid boost: meaningful kick starts at 3 aligned dimensions
+        const sigmoid = 1 / (1 + Math.exp(-(alignCount - 2.5)));
         const boost = 1 + 0.5 * sigmoid;
 
-        const isRare = alignCount >= 4;
+        const isRare = alignCount >= 3;
 
         return {
             alignCount,
@@ -975,15 +975,15 @@ export const ConfluenceEngine = {
 
         const kzActive = context?.session?.killZone ? true : false;
 
-        if (confidence >= 75 && compositeRisk <= 35 && alignment.alignCount >= 4) {
+        if (confidence >= 75 && compositeRisk <= 35 && alignment.alignCount >= 3) {
             return {
-                grade: 'A+',
-                label: kzActive ? '🏛️ A+ Institutional (Kill Zone)' : '🏛️ A+ Institutional',
+                grade: 'S',
+                label: kzActive ? '🏛️ S Institutional (Kill Zone)' : '🏛️ S Institutional',
                 tradeable: true
             };
         }
 
-        if (confidence >= 60 && compositeRisk <= 50 && alignment.alignCount >= 3) {
+        if (confidence >= 60 && compositeRisk <= 50 && alignment.alignCount >= 2) {
             return { grade: 'A', label: '✅ A High Probability', tradeable: true };
         }
 
@@ -991,7 +991,11 @@ export const ConfluenceEngine = {
             return { grade: 'B', label: '🔵 B Contextual Setup', tradeable: true };
         }
 
-        return { grade: 'C', label: '⚪ C Weak — Avoid', tradeable: false };
+        if (confidence >= 20) {
+            return { grade: 'C', label: '⚪ C Micro Scalp', tradeable: true };
+        }
+
+        return { grade: 'D', label: '⚠ D Weak — Avoid', tradeable: true };
     },
 
     // ═══════════════════════════════════════════════════════════════════════

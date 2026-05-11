@@ -312,7 +312,7 @@ export const RegimeEngine = {
                 // No more hard-block. Steeply elevated EV gate + size cut means
                 // only Hunter mode (evMul 0.8) can sneak setups through, and
                 // even those require unusually strong probability.
-                return { evMultiplier: 1.60, confidenceDelta:  0.15, sizeMultiplier: 0.40, biasDirection: null };
+                return { evMultiplier: 1.20, confidenceDelta:  0.05, sizeMultiplier: 0.40, biasDirection: null };
             case 'transition':
                 return { evMultiplier: 1.10, confidenceDelta:  0.05, sizeMultiplier: 0.65, biasDirection: null };
         }
