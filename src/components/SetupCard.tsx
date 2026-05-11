@@ -30,7 +30,7 @@ export const SetupCard: React.FC = () => {
     const setup = pendingSetup.adjusted as AdjustedSetup;
     const isLong = setup.direction === 'long';
     const tier = setup.tier || 'C';
-    const tierColor = tier === 'A+' ? '#00e1ff' : tier === 'A' ? '#00ff88' : tier === 'B' ? '#ffb800' : '#ff3366';
+    const tierColor = tier === 'S' ? '#eebb00' : tier === 'A' ? '#00ff88' : tier === 'B' ? '#ffb800' : tier === 'C' ? '#00e1ff' : '#ff3366';
 
     const color = isLong ? '#00e1ff' : '#ff3366';
 

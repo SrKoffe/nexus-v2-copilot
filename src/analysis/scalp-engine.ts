@@ -248,24 +248,19 @@ export const ScalpEngine = {
         const potentialProfit = (targetDistancePct * leverage) - costs;
         const potentialLoss = (slDistancePct * leverage) + costs;
         
-        const winProbability = 0.60; // Base win probability from L2
+        let winProbability = 0.60; // Base win probability from L2
         const ev = (potentialProfit * winProbability) - (potentialLoss * (1 - winProbability));
         
         const reqEV = 1.2 * costs; // EV must be 1.2x costs
 
+        const warnings = payload.warnings || [];
+
         if (ev < reqEV) {
-            setStatus(3, 'rejected', direction, `Negative EV: ${ev.toFixed(2)} < Req: ${reqEV.toFixed(2)}`);
-            return;
+            winProbability *= 0.5; // Penalize instead of reject
+            warnings.push(`Negative EV edge (${ev.toFixed(2)} vs req ${reqEV.toFixed(2)})`);
         }
 
         setStatus(4, 'evaluating', direction, 'Checking Velocity...');
-
-        // 3. Velocity / Anti-Churn (Level 4)
-        const tpm = this._state.sessionScalpCount / (Math.max(1, this._state.candlesSinceEval)); // Fake metric
-        if (tpm > 5 && leverage > 20) {
-             setStatus(4, 'rejected', direction, 'Overtrading blocked');
-             return;
-        }
 
         const finalSetup = {
             direction: direction,
@@ -287,7 +282,7 @@ export const ScalpEngine = {
             positionSizeUsd: balanceUsd * 0.1, // 10% risk
             notionalUsd: balanceUsd * 0.1 * leverage,
             reason: payload.l2Reason,
-            warnings: [],
+            warnings: warnings,
             accepted: true
         };
 
@@ -547,6 +542,20 @@ export const ScalpEngine = {
             probability: 0,
             direction: 'neutral'
         });
+
+        // Edge Memory Persistence
+        if (typeof window !== 'undefined' && window.__TAURI__) {
+            import('@tauri-apps/api/core').then(({ invoke }) => {
+                invoke('record_trade_outcome', {
+                    outcome: {
+                        id: result.id || Math.random().toString(36).substr(2, 9),
+                        pnl_pct: result.pnlPct || 0,
+                        exit_price: result.exitPrice || 0,
+                        timestamp: Date.now()
+                    }
+                }).catch(err => console.warn('[ScalpEngine] Failed to record edge memory:', err));
+            }).catch(err => console.warn('[ScalpEngine] Tauri import failed:', err));
+        }
     },
 
     getStatus() {
@@ -984,10 +993,6 @@ export const ScalpEngine = {
                 confirmations.push('displacement');
             }
         }
-        if (score < this._config.minSetupScore * 0.8) {
-            console.debug(`[ScalpEngine] _scanLiquiditySweepReversal: score ${score} too low`);
-            return null;
-        }
         console.debug(`[ScalpEngine] _scanLiquiditySweepReversal: returning setup score=${score} confirmations=${confirmations.join(',')}`);
         return this._buildSetup('liquidity_sweep_reversal', direction, score, confirmations, data);
     },
@@ -1060,10 +1065,6 @@ export const ScalpEngine = {
                 confirmations.push('ob_poc_cluster');
             }
         }
-        if (score < this._config.minSetupScore * 0.8) {
-            console.debug(`[ScalpEngine] _scanOrderBlockRetest: score ${score} too low`);
-            return null;
-        }
         console.debug(`[ScalpEngine] _scanOrderBlockRetest: returning setup score=${score} confirmations=${confirmations.join(',')}`);
         return this._buildSetup('order_block_retest', direction, score, confirmations, data);
     },
@@ -1131,10 +1132,6 @@ export const ScalpEngine = {
                 score += 10;
                 confirmations.push('val_rejection');
             }
-        }
-        if (score < this._config.minSetupScore * 0.8) {
-            console.debug(`[ScalpEngine] _scanVolumeNodeRejection: score ${score} too low`);
-            return null;
         }
         console.debug(`[ScalpEngine] _scanVolumeNodeRejection: returning setup score=${score} confirmations=${confirmations.join(',')}`);
         return this._buildSetup('volume_node_rejection', direction, score, confirmations, data);
@@ -1216,10 +1213,6 @@ export const ScalpEngine = {
                     break;
                 }
             }
-        }
-        if (score < this._config.minSetupScore * 0.8) {
-            console.debug(`[ScalpEngine] _scanMicroBOSContinuation: score ${score} too low`);
-            return null;
         }
         console.debug(`[ScalpEngine] _scanMicroBOSContinuation: returning setup score=${score} confirmations=${confirmations.join(',')}`);
         return this._buildSetup('micro_bos_continuation', direction, score, confirmations, data);
@@ -1303,10 +1296,6 @@ export const ScalpEngine = {
         if (orderFlow?.absorption?.detected) {
             score += 10;
             confirmations.push('absorption');
-        }
-        if (score < this._config.minSetupScore * 0.8) {
-            console.debug(`[ScalpEngine] _scanFVGFillRejection: score ${score} too low`);
-            return null;
         }
         console.debug(`[ScalpEngine] _scanFVGFillRejection: returning setup score=${score} confirmations=${confirmations.join(',')}`);
         return this._buildSetup('fvg_fill_rejection', fvgDirection, score, confirmations, data);
@@ -1915,16 +1904,16 @@ export const ScalpEngine = {
         const entryZone = this._computeEntryZone(direction, data);
         const tradeMgmt = this._computeTradeManagement(direction, entryZone, data);
         const sizeMultiplier = this._getSizeMultiplier();
-        let quality;
-        if (score >= this._config.premiumThreshold) quality = 'premium';
-        else if (score >= this._config.highQualityThreshold) quality = 'high';
-        else if (score >= this._config.minSetupScore) quality = 'standard';
-        else quality = 'developing';
+
+        const tier = score >= 85 ? 'S' : score >= 75 ? 'A' : score >= 65 ? 'B' : score >= 50 ? 'C' : 'D';
+        const quality = tier;
+
         return {
             type,
             direction,
             score,
             quality,
+            tier,
             entryZone: {
                 low: Math.round(entryZone.low * 100) / 100,
                 high: Math.round(entryZone.high * 100) / 100,

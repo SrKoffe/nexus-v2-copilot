@@ -4,6 +4,7 @@ import { EventBus } from './event-bus';
 import { candleManager } from './candle-manager';
 import { maestro } from './engine';
 import { ScalpEngine } from './scalp-engine';
+import { FastPathEngine } from './fast-path-engine';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
@@ -21,6 +22,7 @@ export async function initAnalysisPipeline() {
     // 1. Initialize Engines
     maestro.init();
     ScalpEngine.init();
+    FastPathEngine.subscribe();
 
     // 1.5 Fetch History to Bootstrap Indicators/Engines
     try {

@@ -80,8 +80,8 @@ export class EventBusSystem {
         // Define throttle limits for high frequency events (ms)
         this.throttleLimits.set('MARKET_TICK', 50); // Max 20fps
         this.throttleLimits.set('TICK_UPDATE', 50);
-        this.throttleLimits.set('ANALYSIS_SIGNAL', 200); // UI sync
-        this.throttleLimits.set('SCALP_SETUP', 200);
+        this.throttleLimits.set('ANALYSIS_SIGNAL', 50); // UI sync
+        this.throttleLimits.set('SCALP_SETUP', 50);
     }
 
     on(event: string, handler: Function) {

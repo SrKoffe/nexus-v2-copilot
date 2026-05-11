@@ -155,9 +155,9 @@ impl UniverseScanner {
                     // Send to EventBus
                     let _ = event_sender.send(SystemEvent::UniverseScanUpdate(tickers.clone()));
 
-                    // Throttle to frontend (1Hz)
+                    // Throttle to frontend (5Hz)
                     let now = std::time::Instant::now();
-                    if now.duration_since(last_frontend_update).as_millis() >= 1000 {
+                    if now.duration_since(last_frontend_update).as_millis() >= 200 {
                         let _ = app_handle.emit("universe-scan-update", &tickers);
                         last_frontend_update = now;
                     }
