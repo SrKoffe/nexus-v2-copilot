@@ -4,7 +4,7 @@ import { EventBus } from '../analysis/event-bus';
 
 export const LiveFeed: React.FC = () => {
     const [logs, setLogs] = useState<{ id: number, text: string, type: string }[]>([
-        { id: 2, text: "Hunting for institutional liquidity sweeps...", type: "sys" },
+        { id: 2, text: "Hunting for real-time market micro-opportunities...", type: "sys" },
         { id: 1, text: "Terminal initialized.", type: "sys" }
     ]);
 

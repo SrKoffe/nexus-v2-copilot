@@ -98,7 +98,7 @@ function getContext(): ContextState {
 
     const details: ContextState['details'] = [
         { label: 'Regime', value: regime || 'unknown', color: regime?.includes('trending') ? '#00ff88' : '#8892b0' },
-        { label: 'Confidence', value: `${regimeConf}%`, color: regimeConf > 60 ? '#00ff88' : '#ffb800' },
+        { label: 'Probability', value: `${regimeConf}%`, color: regimeConf > 60 ? '#00ff88' : '#ffb800' },
     ];
     if (poc) details.push({ label: 'POC', value: `$${poc.toFixed(1)}`, color: '#00e1ff' });
     if (vah) details.push({ label: 'VAH', value: `$${vah.toFixed(1)}`, color: '#9d4edd' });

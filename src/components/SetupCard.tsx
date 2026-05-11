@@ -72,7 +72,7 @@ export const SetupCard: React.FC = () => {
                     </span>
                 </div>
                 <span className="mono text-xs" style={{ background: `${color}20`, padding: '4px 8px', borderRadius: '2px', color }}>
-                    CONF: {(setup.confidence * 100).toFixed(0)}% · {setup.leverage}x
+                    PROB: {(setup.confidence * 100).toFixed(0)}% · {setup.leverage}x
                 </span>
             </div>
 
