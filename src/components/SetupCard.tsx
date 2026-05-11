@@ -305,7 +305,7 @@ const ActiveIdleView: React.FC<{
                         ? `Pipeline L${pipelineStage} evaluating…`
                         : universeCount === 0
                             ? 'Connecting to scanner…'
-                            : `Scanning ${universeCount} markets...`}
+                            : `Hunting across ${universeCount} markets...`}
                 </span>
                 <span style={{ marginLeft: 'auto', fontSize: '9px', color: stale ? '#ff7777' : '#666' }}>
                     {ageSec !== null ? `${ageSec}s ago` : '—'}

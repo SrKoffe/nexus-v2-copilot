@@ -27,11 +27,11 @@ export const HUD: React.FC = () => {
     };
 
     const stages = [
-        { num: 1, label: 'L0: Regime' },
-        { num: 2, label: 'L1: Microstructure' },
-        { num: 3, label: 'L2: AMT/Profile' },
-        { num: 4, label: 'L3: EV / Target' },
-        { num: 5, label: 'L4: Execution' }
+        { num: 1, label: 'L0: Velocity' },
+        { num: 2, label: 'L1: Confluence' },
+        { num: 3, label: 'L2: Liquidity' },
+        { num: 4, label: 'L3: OVS Matrix' },
+        { num: 5, label: 'L4: Strike' }
     ];
 
     const dirColor = pipelineDirection === 'long' ? '#00e1ff' : pipelineDirection === 'short' ? '#ff3366' : '#8892b0';
@@ -68,7 +68,7 @@ export const HUD: React.FC = () => {
                         {pipelineReason}
                     </span>
                 ) : (
-                    <span className="text-secondary">Scanning entire market liquidity matrix...</span>
+                    <span className="text-secondary">Hunting entire market liquidity matrix...</span>
                 )}
             </div>
         </div>
