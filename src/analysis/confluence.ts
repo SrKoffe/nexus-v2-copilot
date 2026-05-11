@@ -17,6 +17,7 @@
  */
 // @ts-nocheck
 import { EventBus } from './event-bus';
+import { EdgeMemoryEngine } from './edge-memory';
 import { StateCache } from './state-cache';
 
 export const ConfluenceEngine = {
@@ -155,6 +156,17 @@ export const ConfluenceEngine = {
         // ─── Step 9: Final score ───
         const modifiedScore = boostedScore * contextModifier.multiplier;
         let finalScore = modifiedScore * (1 - conflict.impact);
+
+        // Fetch dynamic adaptive weight from Edge Memory
+        let archetype = 'unknown';
+        if (liquidity?.sweeps?.length > 0) archetype = 'liquidity_sweep_reversal';
+        else if (marketState?.structure?.lastMSS) archetype = 'micro_bos_continuation';
+        else if (volumeProfile?.poc) archetype = 'volume_node_rejection';
+
+        if (typeof EdgeMemoryEngine !== 'undefined' && archetype !== 'unknown') {
+             const adaptiveWeight = EdgeMemoryEngine.getAdaptiveMultiplier(regime, archetype);
+             finalScore *= adaptiveWeight;
+        }
 
         // Boost final score if ML probability is high and aligned
         if (mlProbability > 0.7) {
