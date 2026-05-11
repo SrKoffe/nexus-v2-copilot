@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useScannerStore } from '../store';
+import { ScannerHeatmap } from './ScannerHeatmap';
+import { MarketEnergy } from './MarketEnergy';
 
 export const OpportunityScannerPanel: React.FC = () => {
     const universe = useScannerStore(s => s.universe);
@@ -62,6 +64,8 @@ export const OpportunityScannerPanel: React.FC = () => {
 
     return (
         <div className="panel" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <MarketEnergy />
+            <ScannerHeatmap />
             <div className="panel-header" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px 4px' }}>
                 {/* Search Bar */}
                 <input 

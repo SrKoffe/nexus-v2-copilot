@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNexusStore } from '../store';
+import { PipelineFlow } from './PipelineFlow';
 import './HUD.css';
 
 export const HUD: React.FC = () => {
@@ -37,6 +38,8 @@ export const HUD: React.FC = () => {
     const dirColor = pipelineDirection === 'long' ? '#00e1ff' : pipelineDirection === 'short' ? '#ff3366' : '#8892b0';
 
     return (
+        <>
+        <PipelineFlow />
         <div className="hud-pipeline-visualizer">
             <div className="hud-header">
                 <span className="mono text-sm" style={{ fontWeight: 600, letterSpacing: '1px' }}>
@@ -72,5 +75,6 @@ export const HUD: React.FC = () => {
                 )}
             </div>
         </div>
+        </>
     );
 };

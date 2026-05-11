@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
 import type { NaturalSetup, SetupResult } from './analysis/leverage-risk';
+import { EdgeMemoryEngine } from './analysis/edge-memory';
 import type { Regime, RegimeResult } from './analysis/regime-engine';
 import { ScalpEngine } from './analysis/scalp-engine';
 
@@ -295,6 +296,8 @@ export interface UniverseTicker {
     volatility: number;
     regime: string;
     opportunity_score: number;
+    adaptiveOpportunityScore?: number;
+
     timestamp: number;
 }
 
@@ -317,11 +320,23 @@ export const useScannerStore = create<ScannerState>()(
             favorites: [],
             activeSymbol: 'BTC_USDT',
             lastUpdateMs: 0,
-            setUniverse: (tickers) => set({ 
-                universe: tickers, 
-                topCandidates: tickers.slice(0, 10), // Keep top 10 for UI
-                lastUpdateMs: Date.now() 
-            }),
+            setUniverse: (tickers) => {
+                const updated = tickers.map(t => {
+                    // EdgeMemoryEngine was implemented in the backend/other modules previously but in this session we didn't add it.
+                    // We will just use the base score for now if EdgeMemoryEngine is missing.
+                    let adaptiveMult = 1.0;
+                    if (EdgeMemoryEngine) {
+                        adaptiveMult = EdgeMemoryEngine.getAdaptiveMultiplier(t.regime || 'unknown', 'universe_scan');
+                    }
+                    return { ...t, adaptiveOpportunityScore: t.opportunity_score * adaptiveMult };
+                });
+                updated.sort((a, b) => (b.adaptiveOpportunityScore || 0) - (a.adaptiveOpportunityScore || 0));
+                set({
+                    universe: updated,
+                    topCandidates: updated.slice(0, 10),
+                    lastUpdateMs: Date.now()
+                });
+            },
             setActiveSymbol: (symbol) => {
                 const previous = get().activeSymbol;
                 if (symbol === previous) return;
