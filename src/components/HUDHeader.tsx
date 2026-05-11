@@ -1,9 +1,12 @@
+import { useState } from 'react';
+import { ApiSettingsModal } from './ApiSettingsModal';
 import { MarketStateBadge } from './MarketStateBadge';
 import { AggressionModeSelector } from './AggressionModeSelector';
 import { LeverageSelector } from './LeverageSelector';
 import { useNexusStore, useScannerStore } from '../store';
 
 export function HUDHeader({ livePrice }: { livePrice: number }) {
+    const [showApiModal, setShowApiModal] = useState(false);
     const symbol = useScannerStore(s => s.activeSymbol);
 
     const balance = useNexusStore(s => s.balanceUsd);
@@ -38,7 +41,7 @@ export function HUDHeader({ livePrice }: { livePrice: number }) {
                 <span className="status-pill" style={{ color: modeColor, borderColor: `${modeColor}40` }}>
                     {operatingMode.replace('_', ' ').toUpperCase()}
                 </span>
-                <span className="status-pill text-green">● MEXC</span>
+                <span className="status-pill text-green" style={{ cursor: 'pointer' }} onClick={() => setShowApiModal(true)}>● MEXC</span>
                 <span className="status-pill text-blue">🛡️ ORACLE</span>
                 {mexcConfigured === false && (
                     <span className="status-pill" style={{ color: '#ffaa00', borderColor: '#ffaa00' }}
@@ -54,6 +57,7 @@ export function HUDHeader({ livePrice }: { livePrice: number }) {
                     ${balance.toFixed(2)}
                 </span>
             </div>
+                    {showApiModal && <ApiSettingsModal onClose={() => setShowApiModal(false)} />}
         </header>
     );
 }

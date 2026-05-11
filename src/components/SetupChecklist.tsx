@@ -252,7 +252,7 @@ export const SetupChecklist: React.FC = () => {
         return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '8px' }}>
                 <span style={{ fontSize: '28px', opacity: 0.3 }}>⌖</span>
-                <span className="text-sm" style={{ color: '#555' }}>Scanning markets...</span>
+                <span className="text-sm" style={{ color: '#555' }}>Hunting targets...</span>
                 <span className="mono text-xs" style={{ color: '#444' }}>{leverage}x · {operatingMode}</span>
             </div>
         );

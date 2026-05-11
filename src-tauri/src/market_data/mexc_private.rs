@@ -57,6 +57,29 @@ impl MexcPrivateClient {
     /// Load API credentials from environment (`MEXC_API_KEY`, `MEXC_API_SECRET`).
     /// Returns None if either is missing or empty — Roberto can run without
     /// keys and the UI just won't show real balance.
+    pub async fn from_env_or_db(db: &crate::core::database::Database) -> Option<Self> {
+        let _ = dotenvy::dotenv();
+        let key = std::env::var("MEXC_API_KEY").ok().or_else(|| {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    db.get_config("MEXC_API_KEY").await
+                })
+            })
+        })?;
+        let secret = std::env::var("MEXC_API_SECRET").ok().or_else(|| {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    db.get_config("MEXC_API_SECRET").await
+                })
+            })
+        })?;
+
+        if key.trim().is_empty() || secret.trim().is_empty() {
+            return None;
+        }
+        Some(Self::new(key, secret))
+    }
+
     pub fn from_env() -> Option<Self> {
         // Try .env in current dir first; ignore errors if missing.
         let _ = dotenvy::dotenv();
@@ -191,15 +214,23 @@ impl MexcPrivateClient {
 
 /// Helper: log a warning if the client can't be built (missing env keys).
 /// Returns None gracefully so the rest of the app keeps running.
+pub async fn try_build_from_env_or_db(db: &crate::core::database::Database) -> Option<MexcPrivateClient> {
+    match MexcPrivateClient::from_env_or_db(db).await {
+        Some(c) => Some(c),
+        None => {
+            log::warn!(
+                "[MexcPrivate] MEXC_API_KEY / MEXC_API_SECRET not set in .env or DB —                  balance and positions will fall back to defaults. Create a                  READ-ONLY API key on MEXC and add to enable."
+            );
+            None
+        }
+    }
+}
+
 pub fn try_build_from_env() -> Option<MexcPrivateClient> {
     match MexcPrivateClient::from_env() {
         Some(c) => Some(c),
         None => {
-            warn!(
-                "[MexcPrivate] MEXC_API_KEY / MEXC_API_SECRET not set in .env — \
-                 balance and positions will fall back to defaults. Create a \
-                 READ-ONLY API key on MEXC and add to .env to enable."
-            );
+            log::warn!("[MexcPrivate] MEXC_API_KEY / MEXC_API_SECRET not set in .env.");
             None
         }
     }

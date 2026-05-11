@@ -21,7 +21,7 @@ use execution::engine::ExecutionEngine;
 use engine::state_manager::{StateManager, SystemState};
 use market_data::websocket::MexcStream;
 use market_data::scanner::UniverseScanner;
-use market_data::mexc_private::{MexcPrivateClient, AccountAsset, OpenPosition, try_build_from_env};
+use market_data::mexc_private::{MexcPrivateClient, AccountAsset, OpenPosition, try_build_from_env_or_db};
 use risk::manager::RiskManager;
 
 // ─── Phase 4 Commands ────────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ pub fn run() {
     let execution = Arc::new(ExecutionEngine::new(db.clone()));
     let state_manager = Arc::new(StateManager::new());
     let risk_manager = Arc::new(Mutex::new(RiskManager::new()));
-    let mexc_private = try_build_from_env().map(Arc::new);
+    let mexc_private = tokio::runtime::Handle::current().block_on(async { try_build_from_env_or_db(&db).await }).map(Arc::new);
 
     let app_state = AppState {
         db,
